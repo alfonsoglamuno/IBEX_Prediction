@@ -153,7 +153,7 @@ def _retrain_and_save(df: pd.DataFrame, target: str, task: str,
     except (TypeError, ValueError):
         model.fit(X_tr, y_tr)
 
-    save_model(model, model_name, target)
+    save_model(model, model_name, target, feature_names=feat_c)
 
 
 def main():

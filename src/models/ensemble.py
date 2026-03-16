@@ -60,23 +60,38 @@ from pathlib import Path
 from src.utils.config import root
 
 
-def save_model(model, name: str, target: str) -> Path:
+def save_model(model, name: str, target: str,
+               feature_names: list[str] | None = None) -> Path:
     model_dir = root() / get("persistence.model_dir", "results/models")
     model_dir.mkdir(parents=True, exist_ok=True)
     path = model_dir / f"{target}_{name}.joblib"
-    joblib.dump(model, path)
+    joblib.dump({"model": model, "feature_names": feature_names}, path)
     log.info(f"Saved model -> {path}")
     return path
 
 
 def load_model(name: str, target: str):
+    """Returns the model object (feature_names accessible via load_model_bundle)."""
+    bundle = _load_bundle(name, target)
+    return bundle["model"]
+
+
+def load_model_bundle(name: str, target: str) -> dict:
+    """Returns dict with keys 'model' and 'feature_names'."""
+    return _load_bundle(name, target)
+
+
+def _load_bundle(name: str, target: str) -> dict:
     model_dir = root() / get("persistence.model_dir", "results/models")
-    path = model_dir / f"{target}_{name}.joblib"
+    path      = model_dir / f"{target}_{name}.joblib"
     if not path.exists():
         raise FileNotFoundError(f"No saved model at {path}. Run train.py first.")
-    model = joblib.load(path)
-    log.info(f"Loaded model <- {path}")
-    return model
+    raw = joblib.load(path)
+    # Handle both old format (bare model) and new format (dict with feature_names)
+    if isinstance(raw, dict) and "model" in raw:
+        log.info(f"Loaded model <- {path}")
+        return raw
+    return {"model": raw, "feature_names": None}
 
 
 def best_available_model(target: str):

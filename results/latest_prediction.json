@@ -2,19 +2,123 @@
   "target_dir_1d": {
     "date": "2026-03-13",
     "model": "xgboost",
-    "prob_up": 0.514,
-    "prob_down": 0.486,
+    "prob_up": 0.5127,
+    "prob_down": 0.4873,
     "signal": "NEUTRAL",
     "confidence": "LOW",
-    "generated_at": "2026-03-16"
+    "generated_at": "2026-03-16",
+    "top_drivers": [
+      {
+        "feature": "di_diff21",
+        "feat_value": -0.14215754170884337,
+        "shap_value": 0.0022341308649629354
+      },
+      {
+        "feature": "dist_support_50d",
+        "feat_value": 0.03294390592008702,
+        "shap_value": 0.0014992633368819952
+      },
+      {
+        "feature": "macd_signal",
+        "feat_value": -0.00580766860365306,
+        "shap_value": -0.001228345325216651
+      },
+      {
+        "feature": "lr_slope_10d",
+        "feat_value": -0.0024766469615771073,
+        "shap_value": -0.0009164510993286967
+      },
+      {
+        "feature": "ema8_dist",
+        "feat_value": -0.01314971240686128,
+        "shap_value": -0.000681533943861723
+      },
+      {
+        "feature": "chaikin_vol",
+        "feat_value": 0.7304461062511478,
+        "shap_value": -0.0006210168357938528
+      },
+      {
+        "feature": "adx14",
+        "feat_value": 24.383516947725017,
+        "shap_value": 0.0005388615536503494
+      },
+      {
+        "feature": "stoch_k",
+        "feat_value": 27.06477245363493,
+        "shap_value": -0.00043611996807157993
+      },
+      {
+        "feature": "dist_pivot",
+        "feat_value": -0.005430047437923596,
+        "shap_value": 0.00035422627115622163
+      },
+      {
+        "feature": "atr_14_norm",
+        "feat_value": 0.02261969320221688,
+        "shap_value": -0.00027578131994232535
+      }
+    ]
   },
   "target_dir_5d": {
     "date": "2026-03-13",
     "model": "xgboost",
-    "prob_up": 0.5097,
-    "prob_down": 0.4903,
+    "prob_up": 0.5057,
+    "prob_down": 0.4943,
     "signal": "NEUTRAL",
     "confidence": "LOW",
-    "generated_at": "2026-03-16"
+    "generated_at": "2026-03-16",
+    "top_drivers": [
+      {
+        "feature": "hl_ratio_63d",
+        "feat_value": 0.117809735061948,
+        "shap_value": -0.024239152669906616
+      },
+      {
+        "feature": "ret_std_63d",
+        "feat_value": 0.01168479995262863,
+        "shap_value": -0.011273469775915146
+      },
+      {
+        "feature": "atr_14_norm",
+        "feat_value": 0.02261969320221688,
+        "shap_value": -0.009835703298449516
+      },
+      {
+        "feature": "ret_skew_21d",
+        "feat_value": -0.44863893764758855,
+        "shap_value": 0.007519100327044725
+      },
+      {
+        "feature": "atr_21_norm",
+        "feat_value": 0.020334627999716675,
+        "shap_value": 0.006942423991858959
+      },
+      {
+        "feature": "dist_52w_low_252d",
+        "feat_value": 0.44744532097547185,
+        "shap_value": 0.004150567576289177
+      },
+      {
+        "feature": "dist_52w_high_126d",
+        "feat_value": -0.07770611131126115,
+        "shap_value": -0.003516578581184149
+      },
+      {
+        "feature": "ret_std_5d",
+        "feat_value": 0.017176304977784367,
+        "shap_value": 0.0031918685417622328
+      },
+      {
+        "feature": "dist_52w_low_126d",
+        "feat_value": 0.1310658565389602,
+        "shap_value": -0.002324054017663002
+      },
+      {
+        "feature": "macd",
+        "feat_value": -0.011454638441396586,
+        "shap_value": 0.001915434026159346
+      }
+    ]
   }
 }
