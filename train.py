@@ -1,11 +1,14 @@
 """
-Main training script.
+Main training script — V1 pipeline.
 
 Usage:
-    python train.py                          # all models, direction_1d target
+    python train.py                          # all baselines, target_dir_1d
     python train.py --target target_dir_5d
     python train.py --model xgboost
+    python train.py --model ensemble
+    python train.py --all-targets            # train all targets sequentially
     python train.py --force-download
+    python train.py --no-multiasset
 """
 from __future__ import annotations
 
@@ -14,81 +17,169 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from src.data.fetch import load_raw
 from src.data.features import build_features, feature_cols
+from src.data.multiasset import fetch_multiasset_features
+from src.data.sentiment import fetch_sentiment_features
 from src.evaluation.backtest import walk_forward_cv
 from src.evaluation.metrics import print_metrics
 from src.models.baseline import get_model, REGISTRY
+from src.models.ensemble import make_ensemble, save_model
 from src.utils.config import get, root
 from src.utils.logging import get_logger
 
 log = get_logger(__name__)
 
+ALL_TARGETS = ["target_dir_1d", "target_dir_5d", "target_ret_5d"]
+TASK_MAP    = {
+    "target_dir_1d":    "classification",
+    "target_dir_5d":    "classification",
+    "target_ret_5d":    "regression",
+    "target_vol_regime":"classification",
+}
+
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--target",   default="target_dir_1d",
-                   choices=["target_dir_1d", "target_dir_5d", "target_ret_5d", "target_vol_regime"])
-    p.add_argument("--model",    default="all",
-                   choices=list(REGISTRY) + ["all", "lstm"])
+    p.add_argument("--target",       default="target_dir_1d",
+                   choices=list(TASK_MAP))
+    p.add_argument("--all-targets",  action="store_true",
+                   help="Train all classification + regression targets")
+    p.add_argument("--model",        default="all",
+                   choices=list(REGISTRY) + ["all", "ensemble", "lstm"])
     p.add_argument("--force-download", action="store_true")
+    p.add_argument("--no-multiasset",  action="store_true")
     return p.parse_args()
 
 
-def main():
-    args = parse_args()
-    log.info(f"Target: {args.target} | Model: {args.model}")
-
-    # 1. Data
-    df_raw = load_raw(force=args.force_download)
-    log.info(f"Raw data: {df_raw.index[0].date()} → {df_raw.index[-1].date()} ({len(df_raw)} rows)")
-
-    # 2. Features
+def build_full_feature_matrix(df_raw: pd.DataFrame,
+                               use_multiasset: bool = True) -> pd.DataFrame:
+    """Build feature matrix with optional multi-asset and sentiment features."""
     df = build_features(df_raw)
-    feat_cols = feature_cols(df)
-    log.info(f"Features: {len(feat_cols)} columns | Rows after NaN trim: {len(df)}")
 
-    # 3. Drop rows where target is NaN (forward-looking targets are NaN at the end)
-    df = df.dropna(subset=[args.target])
-    log.info(f"Rows after target NaN drop: {len(df)}")
+    if use_multiasset and get("multiasset.enabled", True):
+        ma = fetch_multiasset_features(df.index)
+        if not ma.empty:
+            df = df.join(ma, how="left")
+            log.info(f"Added {ma.shape[1]} multi-asset features")
 
-    task = "regression" if args.target == "target_ret_5d" else "classification"
+    if get("features.include_sentiment", False):
+        sent = fetch_sentiment_features(df.index)
+        if not sent.empty:
+            df = df.join(sent, how="left")
+            log.info(f"Added {sent.shape[1]} sentiment features")
 
-    # 4. Train / evaluate
-    models_to_run = list(REGISTRY) if args.model == "all" else [args.model]
+    return df
 
-    results = {}
+
+def train_target(df: pd.DataFrame, target: str, models_to_run: list[str]) -> dict:
+    """Train all models for one target, return summary dict."""
+    df_t = df.dropna(subset=[target])
+    task = TASK_MAP.get(target, "classification")
+    log.info(f"\n{'='*60}\nTarget: {target} | Task: {task} | Rows: {len(df_t)}\n{'='*60}")
+
+    results    = {}
+    all_preds  = {}
+
     for model_name in models_to_run:
         if model_name == "lstm":
-            continue  # LSTM uses separate trainer (lstm_train.py)
-        log.info(f"\n{'='*50}\nModel: {model_name}\n{'='*50}")
+            log.info("LSTM: run lstm_train.py separately")
+            continue
 
-        def make_model(name=model_name):
-            m = get_model(name)
-            return m
+        log.info(f"  → Training {model_name}")
+
+        if model_name == "ensemble":
+            make_fn = make_ensemble
+        else:
+            # Capture model_name by value via default arg
+            def make_fn(name=model_name):
+                return get_model(name)
 
         result = walk_forward_cv(
-            df_feat=df,
-            target=args.target,
-            make_model=make_model,
-            task=task,
-            verbose=True,
+            df_feat   = df_t,
+            target    = target,
+            make_model= make_fn,
+            task      = task,
+            verbose   = True,
         )
-        results[model_name] = result.summary
-        print_metrics(result.summary, label=f"{model_name} | {args.target}")
 
-    # 5. Save summary
-    out_dir = root() / "results"
+        results[model_name] = result.summary
+        print_metrics(result.summary, label=f"{model_name} | {target}")
+
+        # ── Save predictions ──────────────────────────────────────────────────
+        if result.all_predictions is not None:
+            pred_dir = root() / get("persistence.predictions_dir", "results")
+            pred_dir.mkdir(exist_ok=True)
+            pred_path = pred_dir / f"{target}_{model_name}_predictions.parquet"
+            result.all_predictions.to_parquet(pred_path)
+            all_preds[model_name] = result.all_predictions
+
+        # ── Retrain on full data and save model ───────────────────────────────
+        _retrain_and_save(df_t, target, task, model_name, make_fn)
+
+    # ── Save JSON summary ─────────────────────────────────────────────────────
+    out_dir  = root() / "results"
     out_dir.mkdir(exist_ok=True)
-    out_path = out_dir / f"{args.target}_summary.json"
+    out_path = out_dir / f"{target}_summary.json"
     with open(out_path, "w") as f:
         json.dump(
             {k: {kk: round(vv, 6) for kk, vv in v.items() if isinstance(vv, float)}
              for k, v in results.items()},
-            f, indent=2
+            f, indent=2,
         )
-    log.info(f"Results saved → {out_path}")
+    log.info(f"Summary saved → {out_path}")
+    return results
+
+
+def _retrain_and_save(df: pd.DataFrame, target: str, task: str,
+                      model_name: str, make_fn) -> None:
+    """Retrain on 80% of data and save the final model."""
+    feat_c = feature_cols(df)
+    X = df[feat_c].values
+    y = df[target].values
+
+    split_idx = int(len(X) * 0.8)
+    X_tr, y_tr = X[:split_idx], y[:split_idx]
+    X_va, y_va = X[split_idx:], y[split_idx:]
+
+    model = make_fn()
+    try:
+        if task == "classification":
+            model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], verbose=False)
+        else:
+            model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], verbose=False)
+    except TypeError:
+        model.fit(X_tr, y_tr)
+
+    save_model(model, model_name, target)
+
+
+def main():
+    args         = parse_args()
+    use_multiasset = not args.no_multiasset
+
+    # ── 1. Data ───────────────────────────────────────────────────────────────
+    df_raw = load_raw(force=args.force_download)
+    log.info(f"Raw: {df_raw.index[0].date()} → {df_raw.index[-1].date()} "
+             f"({len(df_raw)} rows)")
+
+    # ── 2. Features ───────────────────────────────────────────────────────────
+    df = build_full_feature_matrix(df_raw, use_multiasset=use_multiasset)
+    log.info(f"Feature matrix: {df.shape[1]} cols | {len(df)} rows")
+
+    # ── 3. Models ─────────────────────────────────────────────────────────────
+    if args.model == "all":
+        models_to_run = list(REGISTRY) + ["ensemble"]
+    else:
+        models_to_run = [args.model]
+
+    # ── 4. Train ──────────────────────────────────────────────────────────────
+    targets = ALL_TARGETS if args.all_targets else [args.target]
+
+    for target in targets:
+        train_target(df, target, models_to_run)
 
 
 if __name__ == "__main__":

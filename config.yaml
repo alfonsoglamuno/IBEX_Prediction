@@ -1,16 +1,28 @@
 data:
   ticker: "^IBEX"
-  start_date: "2010-01-01"
-  end_date: null           # null = today
+  start_date: "2007-01-01"       # longer history = better walk-forward
+  end_date: null                 # null = today
   cache_dir: "data/cache"
   raw_dir: "data/raw"
   processed_dir: "data/processed"
+
+multiasset:
+  enabled: true
+  tickers:
+    sp500:  "^GSPC"    # S&P 500 — global risk-on/off
+    dax:    "^GDAXI"   # DAX — European proxy
+    eurusd: "EURUSD=X" # Euro strength
+    vix:    "^VIX"     # Fear index
+    brent:  "BZ=F"     # Energy / Spain exposure
+    usbond: "^TNX"     # US 10y yield — macro rates
+  lags: [1, 2, 5]      # lagged returns of each asset
 
 features:
   lags: [1, 2, 3, 5, 10, 21]
   windows: [5, 10, 21, 63]
   include_volume: true
-  include_macro: false     # set true in V2
+  include_multiasset: true
+  include_sentiment: false     # set true after V2 setup
 
 targets:
   direction_1d: true
@@ -21,7 +33,6 @@ targets:
 split:
   train_end: "2021-12-31"
   val_end: "2023-06-30"
-  # everything after val_end is test
 
 walk_forward:
   initial_train_months: 36
@@ -45,9 +56,14 @@ models:
     learning_rate: 0.01
     subsample: 0.8
     colsample_bytree: 0.8
-    scale_pos_weight: 1
     eval_metric: logloss
     early_stopping_rounds: 30
+  lgbm:
+    n_estimators: 500
+    max_depth: 4
+    learning_rate: 0.01
+    subsample: 0.8
+    colsample_bytree: 0.8
   lstm:
     seq_len: 20
     hidden_size: 64
@@ -57,11 +73,18 @@ models:
     lr: 0.001
     epochs: 100
     patience: 15
+  ensemble:
+    base_models: [xgboost, lgbm, random_forest]
+    meta_model: logistic
 
 backtest:
-  transaction_cost_bps: 10   # 10 basis points per trade
-  min_confidence: 0.55       # only trade if P(up) > threshold
-  position_sizing: "fixed"   # fixed | kelly
+  transaction_cost_bps: 10
+  min_confidence: 0.55
+  position_sizing: fixed
+
+persistence:
+  model_dir: "results/models"
+  predictions_dir: "results"
 
 logging:
   level: INFO
