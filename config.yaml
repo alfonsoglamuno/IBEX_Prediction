@@ -1,0 +1,68 @@
+data:
+  ticker: "^IBEX"
+  start_date: "2010-01-01"
+  end_date: null           # null = today
+  cache_dir: "data/cache"
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+
+features:
+  lags: [1, 2, 3, 5, 10, 21]
+  windows: [5, 10, 21, 63]
+  include_volume: true
+  include_macro: false     # set true in V2
+
+targets:
+  direction_1d: true
+  direction_5d: true
+  return_5d: true
+  vol_regime: true
+
+split:
+  train_end: "2021-12-31"
+  val_end: "2023-06-30"
+  # everything after val_end is test
+
+walk_forward:
+  initial_train_months: 36
+  step_months: 3
+  val_months: 3
+
+models:
+  logistic_regression:
+    C: 0.1
+    max_iter: 1000
+    class_weight: balanced
+  random_forest:
+    n_estimators: 300
+    max_depth: 6
+    min_samples_leaf: 20
+    class_weight: balanced
+    n_jobs: -1
+  xgboost:
+    n_estimators: 500
+    max_depth: 4
+    learning_rate: 0.01
+    subsample: 0.8
+    colsample_bytree: 0.8
+    scale_pos_weight: 1
+    eval_metric: logloss
+    early_stopping_rounds: 30
+  lstm:
+    seq_len: 20
+    hidden_size: 64
+    num_layers: 2
+    dropout: 0.3
+    batch_size: 64
+    lr: 0.001
+    epochs: 100
+    patience: 15
+
+backtest:
+  transaction_cost_bps: 10   # 10 basis points per trade
+  min_confidence: 0.55       # only trade if P(up) > threshold
+  position_sizing: "fixed"   # fixed | kelly
+
+logging:
+  level: INFO
+  dir: "logs"
