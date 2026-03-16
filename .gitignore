@@ -17,6 +17,11 @@ data/cache/
 .DS_Store
 Thumbs.db
 
+# Keep result summaries but ignore model binaries and large parquet predictions
+results/models/
+results/*_predictions.parquet
+results/*_shap.parquet
+
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 

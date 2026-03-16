@@ -88,7 +88,7 @@ def train_target(df: pd.DataFrame, target: str, models_to_run: list[str]) -> dic
             log.info("LSTM: run lstm_train.py separately")
             continue
 
-        log.info(f"  → Training {model_name}")
+        log.info(f"  -> Training {model_name}")
 
         if model_name == "ensemble":
             make_fn = make_ensemble
@@ -129,7 +129,7 @@ def train_target(df: pd.DataFrame, target: str, models_to_run: list[str]) -> dic
              for k, v in results.items()},
             f, indent=2,
         )
-    log.info(f"Summary saved → {out_path}")
+    log.info(f"Summary saved -> {out_path}")
     return results
 
 
@@ -150,7 +150,7 @@ def _retrain_and_save(df: pd.DataFrame, target: str, task: str,
             model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], verbose=False)
         else:
             model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], verbose=False)
-    except TypeError:
+    except (TypeError, ValueError):
         model.fit(X_tr, y_tr)
 
     save_model(model, model_name, target)
@@ -162,7 +162,7 @@ def main():
 
     # ── 1. Data ───────────────────────────────────────────────────────────────
     df_raw = load_raw(force=args.force_download)
-    log.info(f"Raw: {df_raw.index[0].date()} → {df_raw.index[-1].date()} "
+    log.info(f"Raw: {df_raw.index[0].date()} to {df_raw.index[-1].date()} "
              f"({len(df_raw)} rows)")
 
     # ── 2. Features ───────────────────────────────────────────────────────────

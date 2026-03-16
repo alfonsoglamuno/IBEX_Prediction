@@ -130,19 +130,19 @@ def main():
     out_path.parent.mkdir(exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(predictions, f, indent=2)
-    log.info(f"Prediction saved → {out_path}")
+    log.info(f"Prediction saved -> {out_path}")
 
     # Print summary
-    print("\n" + "═" * 50)
+    print("\n" + "=" * 50)
     print("  IBEX35 MARKET SIGNAL")
-    print("═" * 50)
+    print("=" * 50)
     for target, pred in predictions.items():
         if "error" in pred:
             print(f"  {target}: {pred['error']}")
         else:
-            horizon = "1 día" if "1d" in target else "5 días"
-            print(f"  {horizon:8s}  {pred['signal']:7s}  P(↑)={pred['prob_up']:.1%}  [{pred['confidence']}]")
-    print("═" * 50)
+            horizon = "1 dia" if "1d" in target else "5 dias"
+            print(f"  {horizon:8s}  {pred['signal']:7s}  P(up)={pred['prob_up']:.1%}  [{pred['confidence']}]")
+    print("=" * 50)
 
 
 if __name__ == "__main__":

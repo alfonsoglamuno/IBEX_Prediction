@@ -87,9 +87,9 @@ def backtest_metrics(returns: pd.Series, benchmark: pd.Series | None = None) -> 
 
 def print_metrics(metrics: dict, label: str = "") -> None:
     if label:
-        print(f"\n{'─'*40}")
+        print(f"\n{'-'*40}")
         print(f"  {label}")
-        print(f"{'─'*40}")
+        print(f"{'-'*40}")
     for k, v in metrics.items():
         if isinstance(v, float):
             print(f"  {k:<22} {v:+.4f}")

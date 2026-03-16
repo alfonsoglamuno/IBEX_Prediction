@@ -1,0 +1,20 @@
+{
+  "xgboost": {
+    "accuracy": 0.582229,
+    "balanced_accuracy": 0.547898,
+    "f1": 0.598216,
+    "f1_macro": 0.466501,
+    "roc_auc": 0.585205,
+    "pr_auc": 0.63954,
+    "bt_total_return": 0.012651,
+    "bt_ann_return": 0.055379,
+    "bt_ann_volatility": 0.03203,
+    "bt_sharpe": 0.530714,
+    "bt_max_drawdown": -0.010677,
+    "bt_calmar": 6.443874,
+    "bt_hit_ratio": 0.046303,
+    "bt_bm_total_return": 0.008539,
+    "bt_bm_ann_return": 0.080216,
+    "bt_excess_return": -0.024837
+  }
+}

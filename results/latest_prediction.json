@@ -1,0 +1,20 @@
+{
+  "target_dir_1d": {
+    "date": "2026-03-13",
+    "model": "xgboost",
+    "prob_up": 0.514,
+    "prob_down": 0.486,
+    "signal": "NEUTRAL",
+    "confidence": "LOW",
+    "generated_at": "2026-03-16"
+  },
+  "target_dir_5d": {
+    "date": "2026-03-13",
+    "model": "xgboost",
+    "prob_up": 0.5097,
+    "prob_down": 0.4903,
+    "signal": "NEUTRAL",
+    "confidence": "LOW",
+    "generated_at": "2026-03-16"
+  }
+}

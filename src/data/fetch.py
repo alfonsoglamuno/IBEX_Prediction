@@ -48,7 +48,7 @@ def fetch_ohlcv(
     raw = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
 
     if raw.empty:
-        raise ValueError(f"yfinance returned no data for {ticker} [{start} → {end}]")
+        raise ValueError(f"yfinance returned no data for {ticker} [{start} to {end}]")
 
     # Flatten MultiIndex columns if present (yfinance v0.2+)
     if isinstance(raw.columns, pd.MultiIndex):

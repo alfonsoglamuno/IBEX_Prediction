@@ -1,0 +1,20 @@
+{
+  "random_forest": {
+    "accuracy": 0.501005,
+    "balanced_accuracy": 0.515077,
+    "f1": 0.420353,
+    "f1_macro": 0.474663,
+    "roc_auc": 0.522479,
+    "pr_auc": 0.56938,
+    "bt_total_return": -0.00215,
+    "bt_ann_return": -0.002344,
+    "bt_ann_volatility": 0.040617,
+    "bt_sharpe": 0.030223,
+    "bt_max_drawdown": -0.018298,
+    "bt_calmar": 8.566198,
+    "bt_hit_ratio": 0.027774,
+    "bt_bm_total_return": 0.008539,
+    "bt_bm_ann_return": 0.080216,
+    "bt_excess_return": -0.082559
+  }
+}

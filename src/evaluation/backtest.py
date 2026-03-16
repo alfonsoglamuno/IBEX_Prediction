@@ -96,7 +96,7 @@ def walk_forward_cv(
         if task == "classification":
             try:
                 model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], verbose=False)
-            except TypeError:
+            except (TypeError, ValueError):
                 model.fit(X_tr, y_tr)
 
             y_prob = _get_proba(model, X_va)
@@ -124,7 +124,7 @@ def walk_forward_cv(
         else:
             try:
                 model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], verbose=False)
-            except TypeError:
+            except (TypeError, ValueError):
                 model.fit(X_tr, y_tr)
             y_pred = model.predict(X_va)
             y_prob = None

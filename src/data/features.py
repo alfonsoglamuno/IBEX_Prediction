@@ -162,220 +162,187 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Input:  raw OHLCV DataFrame (DatetimeIndex, columns: Open High Low Close Volume)
     Output: feature matrix + target columns. NaN rows (feature side) trimmed.
+
+    All columns are accumulated in a dict first, then assembled in a single
+    pd.DataFrame call to avoid the PerformanceWarning from repeated inserts.
     """
     cfg_lags = get("features.lags",    [1, 2, 3, 5, 10, 21])
     cfg_wins = get("features.windows", [5, 10, 21, 63])
     use_vol  = get("features.include_volume", True)
 
-    out = pd.DataFrame(index=df.index)
-    c   = df["Close"]
-    h   = df["High"]
-    lo  = df["Low"]
-    v   = df["Volume"] if "Volume" in df.columns else pd.Series(np.nan, index=df.index)
+    cols: dict[str, pd.Series] = {}   # accumulator — no fragmentation
+
+    c  = df["Close"]
+    h  = df["High"]
+    lo = df["Low"]
+    v  = df["Volume"] if "Volume" in df.columns else pd.Series(np.nan, index=df.index)
 
     daily_lr = _log_return(c, 1)
 
     # ── 1. Lagged log returns ─────────────────────────────────────────────────
     for lag in cfg_lags:
-        out[f"ret_lag{lag}"] = daily_lr.shift(lag)
+        cols[f"ret_lag{lag}"] = daily_lr.shift(lag)
 
     # ── 2. Rolling statistics ─────────────────────────────────────────────────
     for w in cfg_wins:
         roll = daily_lr.rolling(w)
-        out[f"ret_mean_{w}d"]  = roll.mean()
-        out[f"ret_std_{w}d"]   = roll.std()
-        out[f"ret_skew_{w}d"]  = roll.skew()
-        out[f"hl_ratio_{w}d"]  = (h.rolling(w).max() - lo.rolling(w).min()) / (c.rolling(w).mean() + 1e-9)
+        cols[f"ret_mean_{w}d"] = roll.mean()
+        cols[f"ret_std_{w}d"]  = roll.std()
+        cols[f"ret_skew_{w}d"] = roll.skew()
+        cols[f"hl_ratio_{w}d"] = (h.rolling(w).max() - lo.rolling(w).min()) / (c.rolling(w).mean() + 1e-9)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # CATEGORY 1 — TREND indicators
     # ═══════════════════════════════════════════════════════════════════════════
 
-    # Moving averages: SMA & EMA
     for p in [5, 10, 20, 50, 100, 200]:
         sma = c.rolling(p).mean()
-        out[f"sma{p}_dist"] = (c - sma) / (sma + 1e-9)   # % distance from SMA
+        cols[f"sma{p}_dist"] = (c - sma) / (sma + 1e-9)
 
     for p in [8, 21, 55]:
         ema = c.ewm(span=p, adjust=False).mean()
-        out[f"ema{p}_dist"] = (c - ema) / (ema + 1e-9)
+        cols[f"ema{p}_dist"] = (c - ema) / (ema + 1e-9)
 
-    # SMA crossover signals (positive = fast above slow → bullish)
     sma5   = c.rolling(5).mean()
-    sma10  = c.rolling(10).mean()
     sma20  = c.rolling(20).mean()
     sma50  = c.rolling(50).mean()
     sma200 = c.rolling(200).mean()
-    out["cross_5_20"]   = (sma5  - sma20)  / (sma20  + 1e-9)
-    out["cross_20_50"]  = (sma20 - sma50)  / (sma50  + 1e-9)
-    out["cross_50_200"] = (sma50 - sma200) / (sma200 + 1e-9)
+    cols["cross_5_20"]   = (sma5  - sma20)  / (sma20  + 1e-9)
+    cols["cross_20_50"]  = (sma20 - sma50)  / (sma50  + 1e-9)
+    cols["cross_50_200"] = (sma50 - sma200) / (sma200 + 1e-9)
 
-    # ADX — trend strength and direction
     adx14, pdi14, ndi14 = _adx(h, lo, c, 14)
     adx21, pdi21, ndi21 = _adx(h, lo, c, 21)
-    out["adx14"]       = adx14
-    out["di_diff14"]   = (pdi14 - ndi14) / 100.0   # directional bias (-1 to +1)
-    out["adx21"]       = adx21
-    out["di_diff21"]   = (pdi21 - ndi21) / 100.0
+    cols["adx14"]     = adx14
+    cols["di_diff14"] = (pdi14 - ndi14) / 100.0
+    cols["adx21"]     = adx21
+    cols["di_diff21"] = (pdi21 - ndi21) / 100.0
 
-    # Linear regression slope — trend quality
     for w in [10, 20, 50]:
-        out[f"lr_slope_{w}d"] = _linreg_slope(c, w)
+        cols[f"lr_slope_{w}d"] = _linreg_slope(c, w)
 
-    # Price relative to 52-week range
     for w in [63, 126, 252]:
-        out[f"dist_52w_high_{w}d"] = c / (c.rolling(w).max() + 1e-9) - 1
-        out[f"dist_52w_low_{w}d"]  = c / (c.rolling(w).min() + 1e-9) - 1
+        cols[f"dist_52w_high_{w}d"] = c / (c.rolling(w).max() + 1e-9) - 1
+        cols[f"dist_52w_low_{w}d"]  = c / (c.rolling(w).min() + 1e-9) - 1
 
     # ═══════════════════════════════════════════════════════════════════════════
     # CATEGORY 2 — MOMENTUM indicators
     # ═══════════════════════════════════════════════════════════════════════════
 
-    # RSI (multiple periods)
     for p in [7, 14, 21]:
-        out[f"rsi_{p}"] = _rsi(c, p)
+        cols[f"rsi_{p}"] = _rsi(c, p)
+    cols["rsi14_slope5"] = _rsi(c, 14).diff(5)
 
-    # RSI divergence: raw RSI slope (momentum of momentum)
-    out["rsi14_slope5"] = _rsi(c, 14).diff(5)
-
-    # Stochastic
     stoch_k, stoch_d = _stochastic(h, lo, c, 14, 3)
-    out["stoch_k"]    = stoch_k
-    out["stoch_d"]    = stoch_d
-    out["stoch_diff"] = stoch_k - stoch_d   # signal crossover
+    cols["stoch_k"]    = stoch_k
+    cols["stoch_d"]    = stoch_d
+    cols["stoch_diff"] = stoch_k - stoch_d
 
-    # Williams %R
-    out["williams_r14"] = _williams_r(h, lo, c, 14)
+    cols["williams_r14"] = _williams_r(h, lo, c, 14)
+    cols["cci14"]        = _cci(h, lo, c, 14)
+    cols["cci20"]        = _cci(h, lo, c, 20)
 
-    # CCI (Commodity Channel Index)
-    out["cci14"] = _cci(h, lo, c, 14)
-    out["cci20"] = _cci(h, lo, c, 20)
-
-    # Rate of Change
     for p in [5, 10, 21]:
-        out[f"roc_{p}"] = (c / (c.shift(p) + 1e-9) - 1) * 100
+        cols[f"roc_{p}"] = (c / (c.shift(p) + 1e-9) - 1) * 100
 
-    # MACD
     ema12      = c.ewm(span=12, adjust=False).mean()
     ema26      = c.ewm(span=26, adjust=False).mean()
     macd_line  = ema12 - ema26
     macd_sig   = macd_line.ewm(span=9, adjust=False).mean()
-    out["macd"]        = macd_line / (c + 1e-9)        # normalised by price
-    out["macd_signal"] = macd_sig  / (c + 1e-9)
-    out["macd_hist"]   = (macd_line - macd_sig) / (c + 1e-9)
-    out["macd_hist_slope3"] = out["macd_hist"].diff(3)  # acceleration
+    macd_hist  = (macd_line - macd_sig) / (c + 1e-9)
+    cols["macd"]             = macd_line / (c + 1e-9)
+    cols["macd_signal"]      = macd_sig  / (c + 1e-9)
+    cols["macd_hist"]        = macd_hist
+    cols["macd_hist_slope3"] = macd_hist.diff(3)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # CATEGORY 3 — VOLATILITY indicators
     # ═══════════════════════════════════════════════════════════════════════════
 
-    # Bollinger Bands (20-day, 2σ)
     boll_mid = c.rolling(20).mean()
     boll_std = c.rolling(20).std()
-    out["boll_pct_b"]      = (c - (boll_mid - 2 * boll_std)) / (4 * boll_std + 1e-9)  # %B
-    out["boll_width"]      = (4 * boll_std) / (boll_mid + 1e-9)
-    out["boll_upper_dist"] = (c - (boll_mid + 2 * boll_std)) / (c + 1e-9)
-    out["boll_lower_dist"] = (c - (boll_mid - 2 * boll_std)) / (c + 1e-9)
+    cols["boll_pct_b"]      = (c - (boll_mid - 2*boll_std)) / (4*boll_std + 1e-9)
+    cols["boll_width"]      = (4*boll_std) / (boll_mid + 1e-9)
+    cols["boll_upper_dist"] = (c - (boll_mid + 2*boll_std)) / (c + 1e-9)
+    cols["boll_lower_dist"] = (c - (boll_mid - 2*boll_std)) / (c + 1e-9)
 
-    # ATR (normalised by close)
     for p in [7, 14, 21]:
-        out[f"atr_{p}_norm"] = _atr(h, lo, c, p) / (c + 1e-9)
+        cols[f"atr_{p}_norm"] = _atr(h, lo, c, p) / (c + 1e-9)
+    cols["atr_ratio_7_21"] = _atr(h, lo, c, 7) / (_atr(h, lo, c, 21) + 1e-9)
+    cols["keltner_pct"]    = _keltner_pct(h, lo, c, 20, 10, 2.0)
 
-    # ATR ratio: short vs long (volatility regime change)
-    out["atr_ratio_7_21"] = _atr(h, lo, c, 7) / (_atr(h, lo, c, 21) + 1e-9)
+    hv = {w: daily_lr.rolling(w).std() * np.sqrt(252) for w in [5, 10, 21, 63]}
+    for w, s in hv.items():
+        cols[f"hv_{w}d"] = s
+    cols["hv_ratio_5_21"]  = hv[5]  / (hv[21]  + 1e-9)
+    cols["hv_ratio_21_63"] = hv[21] / (hv[63]  + 1e-9)
 
-    # Keltner Channel position (%K: 0=lower band, 1=upper band)
-    out["keltner_pct"] = _keltner_pct(h, lo, c, 20, 10, 2.0)
-
-    # Historical volatility (annualised) at multiple windows
-    for w in [5, 10, 21, 63]:
-        out[f"hv_{w}d"] = daily_lr.rolling(w).std() * np.sqrt(252)
-
-    # HV ratio — volatility term structure
-    out["hv_ratio_5_21"]  = out["hv_5d"]  / (out["hv_21d"]  + 1e-9)
-    out["hv_ratio_21_63"] = out["hv_21d"] / (out["hv_63d"]  + 1e-9)
-
-    # Chaikin Volatility: rate of change of (H-L) EMA
     hl_ema = (h - lo).ewm(span=10, adjust=False).mean()
-    out["chaikin_vol"] = hl_ema.pct_change(10)
+    cols["chaikin_vol"] = hl_ema.pct_change(10)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # CATEGORY 4 — VOLUME indicators
     # ═══════════════════════════════════════════════════════════════════════════
 
     if use_vol and v.notna().sum() > 50:
-        # Z-score of volume
-        v_roll_mean = v.rolling(21).mean()
-        v_roll_std  = v.rolling(21).std()
-        v_z21 = (v - v_roll_mean) / (v_roll_std + 1e-9)
-        out["vol_z21"]        = v_z21
-        out["vol_ratio_5_21"] = v.rolling(5).mean() / (v.rolling(21).mean() + 1e-9)
-        out["vol_ratio_1_21"] = v / (v.rolling(21).mean() + 1e-9)
+        v_mean21 = v.rolling(21).mean()
+        v_std21  = v.rolling(21).std()
+        v_z21    = (v - v_mean21) / (v_std21 + 1e-9)
+        cols["vol_z21"]         = v_z21
+        cols["vol_ratio_5_21"]  = v.rolling(5).mean() / (v_mean21 + 1e-9)
+        cols["vol_ratio_1_21"]  = v / (v_mean21 + 1e-9)
+        cols["price_vol_signed"]= daily_lr * v_z21
 
-        # Price × volume interaction (signed)
-        out["price_vol_signed"] = daily_lr * v_z21
-
-        # OBV (On Balance Volume) — normalised slope
         obv = _obv(c, v)
-        out["obv_slope5"]  = obv.diff(5)  / (v.rolling(21).mean() + 1e-9)
-        out["obv_slope21"] = obv.diff(21) / (v.rolling(21).mean() + 1e-9)
+        cols["obv_slope5"]  = obv.diff(5)  / (v_mean21 + 1e-9)
+        cols["obv_slope21"] = obv.diff(21) / (v_mean21 + 1e-9)
+        cols["cmf20"]       = _cmf(h, lo, c, v, 20)
+        cols["mfi14"]       = _mfi(h, lo, c, v, 14)
 
-        # CMF (Chaikin Money Flow)
-        out["cmf20"] = _cmf(h, lo, c, v, 20)
-
-        # MFI (Money Flow Index)
-        out["mfi14"] = _mfi(h, lo, c, v, 14)
-
-        # A/D Line — normalised ROC
         adl = _adl(h, lo, c, v)
-        out["adl_slope5"]  = adl.diff(5)  / (v.rolling(21).mean() + 1e-9)
-        out["adl_slope21"] = adl.diff(21) / (v.rolling(21).mean() + 1e-9)
+        cols["adl_slope5"]  = adl.diff(5)  / (v_mean21 + 1e-9)
+        cols["adl_slope21"] = adl.diff(21) / (v_mean21 + 1e-9)
 
-        # Price Volume Trend (PVT)
         pvt = (daily_lr * v).cumsum()
-        out["pvt_slope10"] = pvt.diff(10) / (v.rolling(21).mean() + 1e-9)
+        cols["pvt_slope10"] = pvt.diff(10) / (v_mean21 + 1e-9)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # CATEGORY 5 — LOCAL MAXIMA / MINIMA (Support & Resistance)
     # ═══════════════════════════════════════════════════════════════════════════
 
-    # Rolling window-based support / resistance (shift(1) avoids lookahead)
     for w in [10, 20, 50]:
-        resistance = h.rolling(w).max().shift(1)
-        support    = lo.rolling(w).min().shift(1)
-        out[f"dist_resistance_{w}d"] = (c - resistance) / (c + 1e-9)   # neg = below resistance
-        out[f"dist_support_{w}d"]    = (c - support)    / (c + 1e-9)   # pos = above support
+        cols[f"dist_resistance_{w}d"] = (c - h.rolling(w).max().shift(1))  / (c + 1e-9)
+        cols[f"dist_support_{w}d"]    = (c - lo.rolling(w).min().shift(1)) / (c + 1e-9)
 
-    # Classical pivot points (based on previous day H/L/C)
-    ph     = h.shift(1)
-    pl     = lo.shift(1)
-    pc     = c.shift(1)
-    pivot  = (ph + pl + pc) / 3
-    r1     = 2 * pivot - pl
-    s1     = 2 * pivot - ph
-    r2     = pivot + (ph - pl)
-    s2     = pivot - (ph - pl)
-    out["dist_pivot"] = (c - pivot) / (c + 1e-9)
-    out["dist_r1"]    = (c - r1)    / (c + 1e-9)
-    out["dist_s1"]    = (c - s1)    / (c + 1e-9)
-    out["dist_r2"]    = (c - r2)    / (c + 1e-9)
-    out["dist_s2"]    = (c - s2)    / (c + 1e-9)
+    ph    = h.shift(1)
+    pl    = lo.shift(1)
+    pc    = c.shift(1)
+    pivot = (ph + pl + pc) / 3
+    r1    = 2*pivot - pl
+    s1    = 2*pivot - ph
+    r2    = pivot + (ph - pl)
+    s2    = pivot - (ph - pl)
+    cols["dist_pivot"] = (c - pivot) / (c + 1e-9)
+    cols["dist_r1"]    = (c - r1)    / (c + 1e-9)
+    cols["dist_s1"]    = (c - s1)    / (c + 1e-9)
+    cols["dist_r2"]    = (c - r2)    / (c + 1e-9)
+    cols["dist_s2"]    = (c - s2)    / (c + 1e-9)
 
-    # Distance to nearest round-number level (psychological levels)
     magnitude = 10 ** np.floor(np.log10(c.median()))
-    round_res = (c / magnitude).round() * magnitude
-    out["dist_round_level"] = (c - round_res) / (c + 1e-9)
+    cols["dist_round_level"] = (c - (c / magnitude).round() * magnitude) / (c + 1e-9)
 
     # ── 6. Calendar features ─────────────────────────────────────────────────
-    out["dow"]          = df.index.dayofweek.astype(float)
-    out["month"]        = df.index.month.astype(float)
-    out["is_month_end"] = df.index.is_month_end.astype(float)
-    out["week_of_year"] = df.index.isocalendar().week.astype(float)
+    cols["dow"]          = pd.Series(df.index.dayofweek.astype(float),   index=df.index)
+    cols["month"]        = pd.Series(df.index.month.astype(float),       index=df.index)
+    cols["is_month_end"] = pd.Series(df.index.is_month_end.astype(float),index=df.index)
+    cols["week_of_year"] = pd.Series(
+        df.index.isocalendar().week.astype(float).values, index=df.index
+    )
 
     # ── 7. Volatility regime context ─────────────────────────────────────────
     rv_21 = daily_lr.rolling(21).std() * np.sqrt(252)
-    out["rv_21"]           = rv_21
-    out["rv_slope10"]      = rv_21.diff(10)   # vol trending up/down
+    cols["rv_21"]      = rv_21
+    cols["rv_slope10"] = rv_21.diff(10)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # TARGET VARIABLES  (forward-looking — use ONLY as y, never as X)
@@ -383,18 +350,20 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     fwd_1d = daily_lr.shift(-1)
     fwd_5d = _log_return(c, 5).shift(-5)
 
-    out["target_dir_1d"]    = (fwd_1d > 0).astype(int)
-    out["target_dir_5d"]    = (fwd_5d > 0).astype(int)
-    out["target_ret_1d"]    = fwd_1d                            # raw 1d return (for backtest PnL)
-    out["target_ret_5d"]    = fwd_5d
+    cols["target_dir_1d"]    = (fwd_1d > 0).astype(int)
+    cols["target_dir_5d"]    = (fwd_5d > 0).astype(int)
+    cols["target_ret_1d"]    = fwd_1d
+    cols["target_ret_5d"]    = fwd_5d
 
-    rv_q33  = rv_21.quantile(0.33)
-    rv_q66  = rv_21.quantile(0.66)
-    out["target_vol_regime"] = pd.cut(
+    rv_q33 = rv_21.quantile(0.33)
+    rv_q66 = rv_21.quantile(0.66)
+    cols["target_vol_regime"] = pd.cut(
         rv_21, bins=[-np.inf, rv_q33, rv_q66, np.inf], labels=[0, 1, 2]
     ).astype(float)
 
-    # ── Drop rows where any FEATURE column is NaN ────────────────────────────
+    # ── Assemble DataFrame in one call (no fragmentation) ────────────────────
+    out = pd.DataFrame(cols, index=df.index)
+
     feat_cols_local = [col for col in out.columns if not col.startswith("target_")]
     before = len(out)
     out.dropna(subset=feat_cols_local, inplace=True)

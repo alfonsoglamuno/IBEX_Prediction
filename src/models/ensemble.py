@@ -65,7 +65,7 @@ def save_model(model, name: str, target: str) -> Path:
     model_dir.mkdir(parents=True, exist_ok=True)
     path = model_dir / f"{target}_{name}.joblib"
     joblib.dump(model, path)
-    log.info(f"Saved model → {path}")
+    log.info(f"Saved model -> {path}")
     return path
 
 
@@ -75,7 +75,7 @@ def load_model(name: str, target: str):
     if not path.exists():
         raise FileNotFoundError(f"No saved model at {path}. Run train.py first.")
     model = joblib.load(path)
-    log.info(f"Loaded model ← {path}")
+    log.info(f"Loaded model <- {path}")
     return model
 
 
