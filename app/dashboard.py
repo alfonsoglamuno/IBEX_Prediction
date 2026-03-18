@@ -284,20 +284,37 @@ with t_signal:
                 """, unsafe_allow_html=True)
 
                 # Probability bar
+                thr      = pred.get("signal_thresholds", {})
+                up_thr   = thr.get("up_threshold",   0.55)
+                down_thr = thr.get("down_threshold",  0.45)
+                thr_mode = thr.get("mode", "fixed")
+                sig_pct  = thr.get("signal_pct", 0.75)
+                thr_label = (f"top/bottom {(1-sig_pct):.0%} of OOS distribution"
+                             if thr_mode == "percentile"
+                             else f"fixed threshold")
+
                 fig_bar = go.Figure(go.Bar(
                     x=["P(up)", "P(down)"],
                     y=[prob_up * 100, prob_down * 100],
                     marker_color=[
-                        "#4caf50" if prob_up  >= 0.55 else "#ff9800",
-                        "#f44336" if prob_down >= 0.55 else "#ff9800",
+                        "#4caf50" if prob_up  >= up_thr   else "#ff9800",
+                        "#f44336" if prob_down >= (1 - down_thr) else "#ff9800",
                     ],
                     text=[f"{prob_up:.1%}", f"{prob_down:.1%}"],
                     textposition="outside",
                 ))
-                fig_bar.add_hline(y=55, line_dash="dot", line_color="gray",
-                                  annotation_text="55% confidence threshold")
+                fig_bar.add_hline(
+                    y=up_thr * 100, line_dash="dot", line_color="#4caf50",
+                    annotation_text=f"UP ≥ {up_thr:.1%} ({thr_label})",
+                    annotation_position="top right",
+                )
+                fig_bar.add_hline(
+                    y=(1 - down_thr) * 100, line_dash="dot", line_color="#f44336",
+                    annotation_text=f"DOWN ≥ {(1-down_thr):.1%}",
+                    annotation_position="bottom right",
+                )
                 fig_bar.update_layout(
-                    height=240, margin=dict(t=10, b=10, l=0, r=0),
+                    height=260, margin=dict(t=10, b=10, l=0, r=0),
                     yaxis_range=[0, 100], showlegend=False,
                     yaxis_title="Probability (%)",
                 )
@@ -625,9 +642,16 @@ with t_results:
             ))
             fig_pred.add_hline(y=0.5, line_dash="dash", line_color="gray",
                                annotation_text="50%")
-            fig_pred.add_hline(y=get("backtest.min_confidence", 0.55),
-                               line_dash="dot", line_color="green",
-                               annotation_text="Confidence threshold (55%)")
+            # Load model-specific UP threshold
+            _thr_path = root() / "results" / "signal_thresholds.json"
+            _thr_key  = f"{target_r}_{model_sel}"
+            _up_thr   = get("backtest.min_confidence", 0.55)
+            if _thr_path.exists():
+                import json as _json
+                _thr_all = _json.load(open(_thr_path))
+                _up_thr  = _thr_all.get(_thr_key, {}).get("up_threshold", _up_thr)
+            fig_pred.add_hline(y=_up_thr, line_dash="dot", line_color="green",
+                               annotation_text=f"UP threshold ({_up_thr:.1%})")
             correct   = pred_df[pred_df["y_true"] == pred_df["y_pred"]]
             incorrect = pred_df[pred_df["y_true"] != pred_df["y_pred"]]
             fig_pred.add_trace(go.Scatter(
@@ -660,9 +684,18 @@ with t_backtest:
 
         bt_col1, bt_col2 = st.columns([1, 2])
         with bt_col1:
-            min_conf_bt = st.slider("Confidence threshold", 0.50, 0.70, 0.55, step=0.01)
+            # Default to champion model's percentile UP-threshold when available
+            _bt_thr_path = root() / "results" / "signal_thresholds.json"
+            _bt_default  = get("backtest.min_confidence", 0.55)
+            if _bt_thr_path.exists():
+                import json as _json2
+                _bt_all     = _json2.load(open(_bt_thr_path))
+                _bt_key     = f"{target_bt}_{list(r_bt.keys())[0]}"
+                _bt_default = float(_bt_all.get(_bt_key, {}).get("up_threshold", _bt_default))
+            min_conf_bt = st.slider("Confidence threshold", 0.50, 0.70,
+                                    float(round(_bt_default, 2)), step=0.01)
             tc_bps_bt   = st.slider("Transaction cost (bps)", 0, 30, 10)
-            st.caption("Strategy goes long when P(up) >= threshold; flat otherwise.")
+            st.caption("Strategy goes long when P(up) ≥ threshold; flat otherwise.")
 
         with bt_col2:
             selected_models = st.multiselect(

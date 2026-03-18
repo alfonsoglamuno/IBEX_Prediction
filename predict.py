@@ -52,44 +52,97 @@ def build_latest_features(force: bool = False, use_multiasset: bool = True) -> t
     return df, feat_c
 
 
+def _load_signal_thresholds(model_name: str, target: str) -> dict | None:
+    path = root() / "results" / "signal_thresholds.json"
+    if not path.exists():
+        return None
+    with open(path) as f:
+        return json.load(f).get(f"{target}_{model_name}")
+
+
 def predict_signal(
     model,
     model_name: str,
     df: pd.DataFrame,
     feat_c: list[str],
+    target: str = "target_dir_1d",
     include_shap: bool = False,
 ) -> dict:
-    latest_row = df[feat_c].fillna(0.0).iloc[-1]
+    latest_row  = df[feat_c].fillna(0.0).iloc[-1]
     latest_date = latest_row.name if hasattr(latest_row, "name") else df.index[-1]
-    X_latest = latest_row.values.reshape(1, -1)
+    X_latest    = latest_row.values.reshape(1, -1)
+    horizon     = "5d" if "5d" in target else "1d"
 
     prob_up = float(model.predict_proba(X_latest)[0, 1])
 
-    # Signal: UP if prob_up > 0.55, DOWN if < 0.45, else NEUTRAL
-    min_conf = get("backtest.min_confidence", 0.55)
-    if prob_up >= min_conf:
-        signal = "UP"
-    elif prob_up <= (1 - min_conf):
-        signal = "DOWN"
-    else:
-        signal = "NEUTRAL"
+    # ── Signal thresholding ───────────────────────────────────────────────────
+    mode            = get("signal.mode", "percentile")
+    thresholds_used: dict = {}
 
-    confidence = "HIGH" if abs(prob_up - 0.5) > 0.15 else \
-                 "MEDIUM" if abs(prob_up - 0.5) > 0.07 else "LOW"
+    if mode == "percentile":
+        thr = _load_signal_thresholds(model_name, target)
+        if thr:
+            up_thr   = thr["up_threshold"]
+            down_thr = thr["down_threshold"]
+
+            if prob_up >= up_thr:
+                signal = "UP"
+            elif prob_up <= down_thr:
+                signal = "DOWN"
+            else:
+                signal = "NEUTRAL"
+
+            # Confidence: how deep into the signal zone is today's probability?
+            if signal != "NEUTRAL":
+                p90, p10 = thr.get("p90", up_thr), thr.get("p10", down_thr)
+                confidence = "HIGH" if (prob_up >= p90 or prob_up <= p10) else "MEDIUM"
+            else:
+                confidence = "LOW"
+
+            thresholds_used = {
+                "mode":           "percentile",
+                "signal_pct":     thr["signal_pct"],
+                "up_threshold":   up_thr,
+                "down_threshold": down_thr,
+            }
+        else:
+            log.warning(
+                f"No signal thresholds found for {target}_{model_name}. "
+                "Run train.py first. Falling back to fixed 0.55 threshold."
+            )
+            mode = "fixed"
+
+    if mode == "fixed":
+        min_conf = get("backtest.min_confidence", 0.55)
+        if prob_up >= min_conf:
+            signal = "UP"
+        elif prob_up <= (1 - min_conf):
+            signal = "DOWN"
+        else:
+            signal = "NEUTRAL"
+        confidence = ("HIGH"   if abs(prob_up - 0.5) > 0.15 else
+                      "MEDIUM" if abs(prob_up - 0.5) > 0.07 else "LOW")
+        thresholds_used = {
+            "mode":           "fixed",
+            "up_threshold":   min_conf,
+            "down_threshold": 1 - min_conf,
+        }
 
     result = {
-        "date":         str(latest_date.date() if hasattr(latest_date, "date") else latest_date),
-        "model":        model_name,
-        "prob_up":      round(prob_up, 4),
-        "prob_down":    round(1 - prob_up, 4),
-        "signal":       signal,
-        "confidence":   confidence,
-        "generated_at": date.today().isoformat(),
+        "date":              str(latest_date.date() if hasattr(latest_date, "date") else latest_date),
+        "horizon":           horizon,
+        "model":             model_name,
+        "prob_up":           round(prob_up, 4),
+        "prob_down":         round(1 - prob_up, 4),
+        "signal":            signal,
+        "confidence":        confidence,
+        "signal_thresholds": thresholds_used,
+        "generated_at":      date.today().isoformat(),
     }
 
     if include_shap:
         from src.explainability.shap_analysis import shap_for_latest
-        shap_df = shap_for_latest(model, latest_row.values, feat_c)
+        shap_df     = shap_for_latest(model, latest_row.values, feat_c)
         top_drivers = shap_df.head(10)[["feature", "feat_value", "shap_value"]].to_dict("records")
         result["top_drivers"] = top_drivers
 
@@ -116,6 +169,7 @@ def main():
                 model, model_name = best_available_model(target)
 
             pred = predict_signal(model, model_name, df, feat_c,
+                                  target=target,
                                   include_shap=args.shap)
             predictions[target] = pred
             log.info(

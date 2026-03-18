@@ -106,9 +106,13 @@ models:
     base_models: [xgboost, lgbm, random_forest]
     meta_model: logistic
 
+signal:
+  mode: "percentile"     # "fixed" (classic 0.55 threshold) or "percentile" (rank-based)
+  percentile: 0.75       # top/bottom quartile → directional signal; middle 50% → NEUTRAL
+
 backtest:
   transaction_cost_bps: 10
-  min_confidence: 0.55
+  min_confidence: 0.55   # used only when signal.mode = "fixed", and for interactive backtest UI
   position_sizing: fixed
 
 persistence:

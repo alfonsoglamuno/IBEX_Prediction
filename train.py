@@ -114,6 +114,11 @@ def train_target(df: pd.DataFrame, target: str, models_to_run: list[str]) -> dic
             result.all_predictions.to_parquet(pred_path)
             all_preds[model_name] = result.all_predictions
 
+            # ── Compute percentile signal thresholds from OOS probs ───────────
+            if "y_prob" in result.all_predictions.columns:
+                _save_signal_thresholds(target, model_name,
+                                        result.all_predictions["y_prob"])
+
         # ── Retrain on full data and save model ───────────────────────────────
         _retrain_and_save(df_t, target, task, model_name, make_fn)
 
@@ -152,6 +157,47 @@ def _retrain_and_save(df: pd.DataFrame, target: str, task: str,
         model.fit(X_tr, y_tr)
 
     save_model(model, model_name, target, feature_names=feat_c)
+
+
+def _save_signal_thresholds(target: str, model_name: str, probs: pd.Series) -> None:
+    """
+    Compute percentile-based UP/DOWN thresholds from OOS walk-forward probabilities
+    and persist to results/signal_thresholds.json.
+
+    Thresholds are model-specific: a calibrated model (std≈0.04) has tight thresholds
+    while an uncalibrated model (std≈0.15) has wide ones. Both correctly represent
+    "top quartile of this model's own conviction distribution".
+    """
+    pct         = get("signal.percentile", 0.75)
+    probs_clean = probs.dropna()
+    if len(probs_clean) < 50:
+        log.warning(f"Too few OOS samples ({len(probs_clean)}) to compute thresholds for {target}_{model_name}")
+        return
+
+    thresholds_path = root() / "results" / "signal_thresholds.json"
+    existing: dict = {}
+    if thresholds_path.exists():
+        with open(thresholds_path) as _f:
+            existing = json.load(_f)
+
+    key = f"{target}_{model_name}"
+    existing[key] = {
+        "up_threshold":   round(float(np.percentile(probs_clean, pct * 100)),       6),
+        "down_threshold": round(float(np.percentile(probs_clean, (1 - pct) * 100)), 6),
+        "p90":            round(float(np.percentile(probs_clean, 90)), 6),
+        "p10":            round(float(np.percentile(probs_clean, 10)), 6),
+        "p50":            round(float(np.percentile(probs_clean, 50)), 6),
+        "n_samples":      int(len(probs_clean)),
+        "signal_pct":     pct,
+        "mode":           "percentile",
+    }
+    with open(thresholds_path, "w") as _f:
+        json.dump(existing, _f, indent=2)
+
+    t = existing[key]
+    log.info(f"Signal thresholds [{key}]: "
+             f"UP≥{t['up_threshold']:.4f}  DOWN≤{t['down_threshold']:.4f}  "
+             f"(top/bottom {(1-pct):.0%} of {t['n_samples']} OOS samples)")
 
 
 def select_champion(all_results: dict[str, dict]) -> dict:
