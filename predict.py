@@ -59,7 +59,7 @@ def predict_signal(
     feat_c: list[str],
     include_shap: bool = False,
 ) -> dict:
-    latest_row = df[feat_c].dropna().iloc[-1]
+    latest_row = df[feat_c].fillna(0.0).iloc[-1]
     latest_date = latest_row.name if hasattr(latest_row, "name") else df.index[-1]
     X_latest = latest_row.values.reshape(1, -1)
 

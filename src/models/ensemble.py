@@ -30,8 +30,12 @@ def make_ensemble() -> Pipeline:
     The stacking CV uses 5-fold time-aware splitting handled by sklearn's
     default StratifiedKFold (acceptable for stacking meta-features).
     """
+    # StackingClassifier trains base models via internal CV without eval_set,
+    # so early_stopping_rounds must be disabled for XGBoost and LightGBM here.
+    xgb_base = make_xgboost()
+    xgb_base.set_params(early_stopping_rounds=None)
     base_estimators = [
-        ("xgboost",       make_xgboost()),
+        ("xgboost",       xgb_base),
         ("lgbm",          make_lgbm()),
         ("random_forest", make_random_forest()),
     ]

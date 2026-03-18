@@ -26,11 +26,12 @@ features:
   windows: [5, 10, 21, 63]
   include_volume: true
   include_multiasset: true
-  # Sentiment: active by default. Uses TWO-TRACK design:
-  #   Track A — full history (include_sentiment: false): price/vol/macro features only
-  #   Track B — sentiment era (include_sentiment: true): restricted to start_date onward
-  # Run both to measure incremental value. Never compare them on different periods.
-  include_sentiment: true
+  # Sentiment: Track A (full history baseline) vs Track B (sentiment era ablation)
+  #   Track A — include_sentiment: false  → full history 2007–today, no sentiment cols
+  #   Track B — include_sentiment: true   → restricted to sentiment_start_date onward
+  # Default: false (Track A). Enable only when running the sentiment ablation study
+  # with actual historical news archive data (RSS alone is not enough).
+  include_sentiment: false
 
 sentiment:
   # First date with trustworthy RSS/archive coverage.

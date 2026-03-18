@@ -114,8 +114,8 @@ def walk_forward_cv(
         if train_mask.sum() < 50 or val_mask.sum() < 5:
             continue
 
-        X_tr, y_tr = X[train_mask], y[train_mask]
-        X_va, y_va = X[val_mask],   y[val_mask]
+        X_tr, y_tr = np.nan_to_num(X[train_mask], nan=0.0), y[train_mask]
+        X_va, y_va = np.nan_to_num(X[val_mask],   nan=0.0), y[val_mask]
         dates_va   = dates[val_mask]
 
         model = make_model()
