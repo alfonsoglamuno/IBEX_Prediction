@@ -143,9 +143,95 @@ c5.metric("Features",          f"{len(feat_c)}")
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 
-t_signal, t_market, t_indicators, t_explain, t_results, t_backtest = st.tabs([
-    "📊 Signal", "📈 Market", "🔧 Indicators", "🧠 Explainability", "📋 Results", "💰 Backtest",
+t_summary, t_signal, t_market, t_indicators, t_explain, t_results, t_backtest = st.tabs([
+    "📝 Summary", "📊 Signal", "📈 Market", "🔧 Indicators", "🧠 Explainability", "📋 Results", "💰 Backtest",
 ])
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 0 — OPERATIVE SUMMARY
+# ═════════════════════════════════════════════════════════════════════════════
+with t_summary:
+    st.subheader("Operative Summary")
+    st.caption("Narrative explanation of the current prediction, sentiment state, and media coverage.")
+
+    col_opts, col_run = st.columns([3, 1])
+    with col_opts:
+        include_news = st.checkbox("Include live news sentiment", value=True,
+                                   help="Fetches current RSS headlines. Takes 5-15s on first run.")
+    with col_run:
+        run_summary = st.button("Generate summary", use_container_width=True, type="primary")
+
+    # Load cached summary or generate on demand
+    @st.cache_data(ttl=900, show_spinner=False)  # 15-min cache
+    def _cached_summary(include_news: bool) -> dict:
+        from app.summary import generate_summary
+        return generate_summary(include_live_news=include_news)
+
+    summary_data: dict = {}
+    if run_summary:
+        st.cache_data.clear()
+        with st.spinner("Generating operative summary (fetching news + scoring)..."):
+            from app.summary import generate_summary
+            summary_data = generate_summary(include_live_news=include_news)
+    else:
+        # Try to load saved summary
+        summary_path = root() / "results" / "latest_summary.json"
+        if summary_path.exists():
+            with open(summary_path) as _f:
+                summary_data = json.load(_f)
+
+    if not summary_data:
+        st.info("Click **Generate summary** to produce the operative summary, or run `python predict.py --shap`.")
+    else:
+        # ── Narrative ──────────────────────────────────────────────────────
+        narrative = summary_data.get("narrative_md", "")
+        if narrative:
+            st.markdown(narrative, unsafe_allow_html=True)
+
+        # ── Sentiment detail table ─────────────────────────────────────────
+        sent = summary_data.get("sentiment", {})
+        if sent:
+            st.divider()
+            st.markdown("#### Sentiment layers")
+            s_col1, s_col2, s_col3, s_col4 = st.columns(4)
+            s_col1.metric("Composite",       f"{sent.get('composite', 0):+.3f}")
+            s_col2.metric("Direct IBEX",     f"{sent.get('direct_ibex', 0):+.3f}")
+            s_col3.metric("Constituent",     f"{sent.get('constituent_rollup', 0):+.3f}")
+            s_col4.metric("Macro / ECB",     f"{sent.get('macro', 0):+.3f}")
+
+        # ── Media table ────────────────────────────────────────────────────
+        media = summary_data.get("media", [])
+        if media:
+            st.divider()
+            st.markdown("#### Recent media coverage")
+            SENT_COLOR = {"pos": "#d4edda", "neu": "#fff3cd", "neg": "#f8d7da"}
+            LAYER_EMOJI = {"index": "📊", "constituent": "🏢", "macro": "🌍"}
+
+            df_media = pd.DataFrame(media)[
+                ["published", "source", "headline", "target_type", "target_name",
+                 "sentiment_score", "sentiment_label"]
+            ].rename(columns={
+                "published": "Published", "source": "Source",
+                "headline": "Headline", "target_type": "Layer",
+                "target_name": "Target", "sentiment_score": "Score",
+                "sentiment_label": "Tone",
+            })
+            df_media["Layer"] = df_media["Layer"].map(LAYER_EMOJI).fillna("—") + " " + df_media["Layer"]
+
+            st.dataframe(
+                df_media,
+                use_container_width=True,
+                height=min(400, 35 + 35 * len(df_media)),
+                column_config={
+                    "Score": st.column_config.NumberColumn(format="%.3f"),
+                    "Published": st.column_config.TextColumn(width="medium"),
+                    "Headline": st.column_config.TextColumn(width="large"),
+                },
+                hide_index=True,
+            )
+
+        st.caption(f"Summary generated: {summary_data.get('generated_at', '—')}")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

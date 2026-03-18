@@ -36,6 +36,7 @@ Open **http://localhost:8501** after running `streamlit run app/dashboard.py`.
 
 | Tab | Contents |
 |-----|----------|
+| **📝 Summary** | **Operative summary**: plain-English narrative explaining *why* the model makes its call — top SHAP drivers, three-layer sentiment state, recent IBEX-relevant headlines with per-article scores |
 | **📊 Signal** | UP/DOWN/NEUTRAL signal with probability bars + top SHAP drivers |
 | **📈 Market** | Interactive candlestick with SMA/Bollinger/support-resistance overlays and volume |
 | **🔧 Indicators** | Color-coded state badges for Trend · Momentum · Volatility · Volume · Pivots |
@@ -59,6 +60,7 @@ Open **http://localhost:8000/docs** for the interactive Swagger UI.
 |--------|----------|-------------|
 | GET | `/health` | Liveness check |
 | GET | `/signal` | Latest cached market signal |
+| GET | `/summary?live_news=true` | **Operative summary**: prediction narrative + sentiment + media |
 | GET | `/indicators` | All technical indicator states |
 | GET | `/latest` | Most recent feature vector |
 | GET | `/history?n=252` | Last N days of OHLCV + log-return |

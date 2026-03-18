@@ -198,3 +198,24 @@ def run_predict_shap(no_multiasset: bool = True):
     if result.returncode != 0:
         raise HTTPException(status_code=500, detail=result.stderr[-500:])
     return get_signal()
+
+
+@app.get("/summary", tags=["prediction"])
+def get_summary(live_news: bool = True):
+    """
+    Return the cached operative summary (narrative + sentiment + media).
+
+    Reads results/latest_summary.json if available; otherwise generates on-the-fly.
+    live_news=true fetches current RSS headlines (adds ~10s on first call).
+    """
+    cached = root() / "results" / "latest_summary.json"
+    if cached.exists() and not live_news:
+        with open(cached) as f:
+            return json.load(f)
+    try:
+        from app.summary import generate_summary, save_summary
+        summary = generate_summary(include_live_news=live_news)
+        save_summary(summary)
+        return summary
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
