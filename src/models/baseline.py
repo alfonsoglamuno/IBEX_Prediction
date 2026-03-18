@@ -49,9 +49,10 @@ def make_random_forest(calibrate: bool = False) -> RandomForestClassifier:
     return clf
 
 
-def make_xgboost(scale_pos_weight: float = 1.0) -> xgb.XGBClassifier:
+def make_xgboost(scale_pos_weight: float = 1.0,
+                 calibrate: bool = False) -> xgb.XGBClassifier:
     cfg = get("models.xgboost", {})
-    return xgb.XGBClassifier(
+    clf = xgb.XGBClassifier(
         n_estimators=cfg.get("n_estimators", 500),
         max_depth=cfg.get("max_depth", 4),
         learning_rate=cfg.get("learning_rate", 0.01),
@@ -60,10 +61,12 @@ def make_xgboost(scale_pos_weight: float = 1.0) -> xgb.XGBClassifier:
         scale_pos_weight=scale_pos_weight,
         eval_metric=cfg.get("eval_metric", "logloss"),
         early_stopping_rounds=cfg.get("early_stopping_rounds", 30),
-        # NOTE: use_label_encoder removed in XGBoost 1.6+
         random_state=42,
         verbosity=0,
     )
+    if calibrate:
+        return CalibratedClassifierCV(clf, method="isotonic", cv=3)
+    return clf
 
 
 def make_lgbm(scale_pos_weight: float = 1.0) -> lgb.LGBMClassifier:
@@ -81,10 +84,11 @@ def make_lgbm(scale_pos_weight: float = 1.0) -> lgb.LGBMClassifier:
 
 
 REGISTRY: dict[str, callable] = {
-    "logistic":      make_logistic,
-    "random_forest": make_random_forest,
-    "xgboost":       make_xgboost,
-    "lgbm":          make_lgbm,
+    "logistic":         make_logistic,
+    "random_forest":    make_random_forest,
+    "xgboost":          make_xgboost,
+    "xgboost_cal":      lambda: make_xgboost(calibrate=True),  # isotonic calibration
+    "lgbm":             make_lgbm,
 }
 
 
