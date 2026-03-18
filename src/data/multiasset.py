@@ -1,16 +1,26 @@
 """
 Multi-asset context features for IBEX35 forecasting.
 
-Fetches correlated global assets and computes lagged returns to use as
-additional predictors. All features are strictly lagged to avoid lookahead.
+Fetches correlated global assets and computes lagged returns as additional
+predictors. All features are strictly lagged (shift ≥ 1) to avoid lookahead.
 
-Assets:
-  - S&P 500    (^GSPC) — global risk sentiment
-  - DAX        (^GDAXI) — European market proxy
-  - EUR/USD    (EURUSD=X) — Euro strength (Spain is EUR-denominated)
-  - VIX        (^VIX) — fear / implied volatility
-  - Brent Oil  (BZ=F) — energy prices (Spain energy costs)
-  - US 10y     (^TNX) — macro rates / cost of capital
+Asset groups:
+  Euro-area benchmark:
+    EURO STOXX 50 (^STOXX50E) — most direct regional benchmark for IBEX
+    VSTOXX proxy  (^V2TX)     — euro-area implied volatility regime
+  Global macro:
+    S&P 500  (^GSPC)    — global risk-on/off
+    DAX      (^GDAXI)   — German / euro proxy
+    EUR/USD  (EURUSD=X) — Euro strength
+    VIX      (^VIX)     — US implied vol / fear
+    Brent    (BZ=F)     — energy / Spain energy exposure
+    US 10y   (^TNX)     — macro rates / discount rate
+
+Literature basis:
+  VSTOXX and EURO STOXX 50 returns have a strong overall negative correlation;
+  using them as lagged regional factors (not contemporaneous) avoids lookahead
+  while capturing euro-area regime information useful for IBEX prediction.
+  (STOXX white paper; Giantsidi & Tarantola 2025 deep-learning review)
 """
 from __future__ import annotations
 
@@ -26,14 +36,20 @@ from src.utils.logging import get_logger
 
 log = get_logger(__name__)
 
+# Default asset map — overridden by config.yaml multiasset.tickers
 _ASSET_MAP = {
-    "sp500":  "^GSPC",
-    "dax":    "^GDAXI",
-    "eurusd": "EURUSD=X",
-    "vix":    "^VIX",
-    "brent":  "BZ=F",
-    "usbond": "^TNX",
+    "sp500":   "^GSPC",
+    "dax":     "^GDAXI",
+    "stoxx50": "^STOXX50E",
+    "eurusd":  "EURUSD=X",
+    "vix":     "^VIX",
+    "vstoxx":  "^V2TX",
+    "brent":   "BZ=F",
+    "usbond":  "^TNX",
 }
+
+# Assets that get level + z-score treatment (not just returns)
+_LEVEL_ASSETS = {"vix", "vstoxx"}
 
 
 def _cache_path(name: str, start: str, end: str) -> Path:
@@ -87,6 +103,16 @@ def fetch_multiasset_features(
 
     out = pd.DataFrame(index=ibex_index)
 
+    level_assets = set(get("multiasset.level_assets", list(_LEVEL_ASSETS)))
+
+    # IBEX close for relative-strength features
+    ibex_close: pd.Series | None = None
+    try:
+        from src.data.fetch import load_raw
+        ibex_close = load_raw()["Close"].reindex(ibex_index, method="ffill")
+    except Exception:
+        pass
+
     for name, ticker in tickers.items():
         s = _fetch_one(ticker, name, start, end, force)
         if s is None:
@@ -96,15 +122,25 @@ def fetch_multiasset_features(
         s = s.reindex(ibex_index, method="ffill")
         lr = np.log(s / s.shift(1))
 
-        # Level feature for VIX (level matters, not just return)
-        if name == "vix":
-            vix_roll = s.rolling(21).mean()
-            out["vix_level"]  = s
-            out["vix_z21"]    = (s - vix_roll) / (s.rolling(21).std() + 1e-9)
+        # Level + z-score for implied-vol assets (VIX, VSTOXX)
+        if name in level_assets:
+            roll21 = s.rolling(21).mean()
+            out[f"{name}_level"] = s.shift(1)               # lag-1 level
+            out[f"{name}_z21"]   = ((s - roll21) / (s.rolling(21).std() + 1e-9)).shift(1)
 
         # Lagged returns
         for lag in lags:
             out[f"{name}_ret_lag{lag}"] = lr.shift(lag)
+
+    # Relative-strength feature: IBEX vs EURO STOXX 50
+    # Captures whether IBEX is outperforming or underperforming its regional benchmark
+    if ibex_close is not None and "stoxx50" in tickers:
+        stoxx_s = _fetch_one(tickers["stoxx50"], "stoxx50", start, end, force)
+        if stoxx_s is not None:
+            stoxx_s = stoxx_s.reindex(ibex_index, method="ffill")
+            rs = np.log(ibex_close / (stoxx_s + 1e-9))   # log ratio
+            out["ibex_vs_stoxx_rs5"]  = rs.diff(5).shift(1)   # 5d relative momentum
+            out["ibex_vs_stoxx_rs21"] = rs.diff(21).shift(1)  # 21d relative momentum
 
     if out.empty:
         log.warning("No multi-asset features computed — check internet / tickers")

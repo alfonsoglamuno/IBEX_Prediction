@@ -328,7 +328,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     cols["dist_r2"]    = (c - r2)    / (c + 1e-9)
     cols["dist_s2"]    = (c - s2)    / (c + 1e-9)
 
-    magnitude = 10 ** np.floor(np.log10(c.median()))
+    # Round-number level distance — magnitude from expanding median (no lookahead)
+    exp_median = c.expanding(252).median().shift(1).ffill()
+    magnitude  = (10 ** np.floor(np.log10(exp_median.clip(lower=1)))).fillna(1000)
     cols["dist_round_level"] = (c - (c / magnitude).round() * magnitude) / (c + 1e-9)
 
     # ── 6. Calendar features ─────────────────────────────────────────────────
@@ -355,11 +357,11 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     cols["target_ret_1d"]    = fwd_1d
     cols["target_ret_5d"]    = fwd_5d
 
-    rv_q33 = rv_21.quantile(0.33)
-    rv_q66 = rv_21.quantile(0.66)
-    cols["target_vol_regime"] = pd.cut(
-        rv_21, bins=[-np.inf, rv_q33, rv_q66, np.inf], labels=[0, 1, 2]
-    ).astype(float)
+    # Vol-regime labels use expanding quantiles (no lookahead into future volatility)
+    rv_q33 = rv_21.expanding(252).quantile(0.33).shift(1).ffill()
+    rv_q66 = rv_21.expanding(252).quantile(0.66).shift(1).ffill()
+    vol_regime = np.where(rv_21 < rv_q33, 0, np.where(rv_21 < rv_q66, 1, 2))
+    cols["target_vol_regime"] = pd.Series(vol_regime, index=df.index, dtype=float)
 
     # ── Assemble DataFrame in one call (no fragmentation) ────────────────────
     out = pd.DataFrame(cols, index=df.index)
@@ -420,39 +422,39 @@ def get_indicator_states(df_raw: pd.DataFrame) -> list[dict]:
     last_c   = c.iloc[-1]
 
     trend_20_50 = "bullish" if sma20_v > sma50_v else "bearish"
-    _s("Tendencia", "SMA20 vs SMA50",  (sma20_v - sma50_v) / sma50_v * 100,
-       trend_20_50, f"SMA20={'↑' if trend_20_50 == 'bullish' else '↓'} vs SMA50")
+    _s("Trend", "SMA20 vs SMA50", (sma20_v - sma50_v) / sma50_v * 100,
+       trend_20_50, f"SMA20={'above' if trend_20_50 == 'bullish' else 'below'} SMA50")
 
     trend_200 = "bullish" if last_c > sma200_v else "bearish"
-    _s("Tendencia", "Precio vs SMA200", (last_c - sma200_v) / sma200_v * 100,
-       trend_200, f"Precio {'encima' if trend_200 == 'bullish' else 'debajo'} SMA200")
+    _s("Trend", "Price vs SMA200", (last_c - sma200_v) / sma200_v * 100,
+       trend_200, f"Price {'above' if trend_200 == 'bullish' else 'below'} SMA200")
 
     adx_v, pdi_v, ndi_v = _adx(h, lo, c, 14)
     adx_last  = adx_v.iloc[-1]
     di_last   = pdi_v.iloc[-1] - ndi_v.iloc[-1]
     adx_state = "bullish" if adx_last > 25 and di_last > 0 else \
                 "bearish" if adx_last > 25 and di_last < 0 else "neutral"
-    _s("Tendencia", "ADX(14)", adx_last, adx_state,
-       f"ADX={adx_last:.1f} ({'Tendencia fuerte' if adx_last > 25 else 'Sin tendencia'})")
+    _s("Trend", "ADX(14)", adx_last, adx_state,
+       f"ADX={adx_last:.1f} ({'Strong trend' if adx_last > 25 else 'No trend'})")
 
     lr_slope = _linreg_slope(c, 20).iloc[-1] * 100
-    _s("Tendencia", "Pendiente LR 20d", lr_slope,
+    _s("Trend", "LinReg Slope 20d", lr_slope,
        "bullish" if lr_slope > 0 else "bearish",
-       f"RegresionLineal 20d: {lr_slope:+.2f}%/día")
+       f"20d linear regression: {lr_slope:+.2f}%/day")
 
     # ── MOMENTUM ──────────────────────────────────────────────────────────────
     rsi14 = _rsi(c, 14).iloc[-1]
     rsi_state = "overbought" if rsi14 > 70 else "oversold" if rsi14 < 30 else "neutral"
     _s("Momentum", "RSI(14)", rsi14, rsi_state,
-       f"RSI={rsi14:.1f} ({'Sobrecompra>70' if rsi14 > 70 else 'Sobreventa<30' if rsi14 < 30 else 'Neutral'})")
+       f"RSI={rsi14:.1f} ({'Overbought>70' if rsi14 > 70 else 'Oversold<30' if rsi14 < 30 else 'Neutral'})")
 
     stk, std = _stochastic(h, lo, c, 14, 3)
     stk_v = stk.iloc[-1]
     std_v = std.iloc[-1]
     stoch_state = "overbought" if stk_v > 80 else "oversold" if stk_v < 20 else \
                   "bullish" if stk_v > std_v else "bearish"
-    _s("Momentum", "Estocástico(14,3)", stk_v, stoch_state,
-       f"%K={stk_v:.1f} %D={std_v:.1f}")
+    _s("Momentum", "Stochastic(14,3)", stk_v, stoch_state,
+       f"%K={stk_v:.1f}  %D={std_v:.1f}")
 
     ema12_v  = c.ewm(span=12, adjust=False).mean().iloc[-1]
     ema26_v  = c.ewm(span=26, adjust=False).mean().iloc[-1]
@@ -461,78 +463,76 @@ def get_indicator_states(df_raw: pd.DataFrame) -> list[dict]:
                  c.ewm(span=26, adjust=False).mean()
                  ).ewm(span=9, adjust=False).mean().iloc[-1]
     hist_v   = macd_v - macd_sig_v
-    hist_prev = (c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
-                 ).ewm(span=9, adjust=False).mean()
     macd_state = "bullish" if hist_v > 0 else "bearish"
-    _s("Momentum", "MACD histograma", hist_v / last_c * 100, macd_state,
-       f"Hist={'↑ positivo' if hist_v > 0 else '↓ negativo'}")
+    _s("Momentum", "MACD Histogram", hist_v / last_c * 100, macd_state,
+       f"Histogram {'positive' if hist_v > 0 else 'negative'}")
 
     cci20 = _cci(h, lo, c, 20).iloc[-1]
     cci_state = "overbought" if cci20 > 100 else "oversold" if cci20 < -100 else "neutral"
     _s("Momentum", "CCI(20)", cci20, cci_state,
-       f"CCI={cci20:.0f} ({'Sobrecompra' if cci20 > 100 else 'Sobreventa' if cci20 < -100 else 'Neutral'})")
+       f"CCI={cci20:.0f} ({'Overbought' if cci20 > 100 else 'Oversold' if cci20 < -100 else 'Neutral'})")
 
     roc10 = (last_c / c.iloc[-11] - 1) * 100 if len(c) > 10 else 0.0
     _s("Momentum", "ROC(10)", roc10,
-       "bullish" if roc10 > 0 else "bearish", f"Cambio 10d: {roc10:+.2f}%")
+       "bullish" if roc10 > 0 else "bearish", f"10d price change: {roc10:+.2f}%")
 
     # ── VOLATILITY ────────────────────────────────────────────────────────────
     boll_mid_v = c.rolling(20).mean().iloc[-1]
     boll_std_v = c.rolling(20).std().iloc[-1]
     pct_b = (last_c - (boll_mid_v - 2 * boll_std_v)) / (4 * boll_std_v + 1e-9)
     boll_state = "overbought" if pct_b > 1 else "oversold" if pct_b < 0 else "neutral"
-    _s("Volatilidad", "Bollinger %B", pct_b * 100, boll_state,
-       f"%B={pct_b*100:.0f}% ({'Encima banda superior' if pct_b > 1 else 'Debajo banda inferior' if pct_b < 0 else 'Dentro bandas'})")
+    _s("Volatility", "Bollinger %B", pct_b * 100, boll_state,
+       f"%B={pct_b*100:.0f}% ({'Above upper band' if pct_b > 1 else 'Below lower band' if pct_b < 0 else 'Within bands'})")
 
-    atr14_v = _atr(h, lo, c, 14).iloc[-1]
+    atr14_v  = _atr(h, lo, c, 14).iloc[-1]
     atr_norm = atr14_v / last_c * 100
-    hv21 = _log_return(c, 1).rolling(21).std().iloc[-1] * np.sqrt(252) * 100
-    hv_median = _log_return(c, 1).rolling(21).std().rolling(252).median().iloc[-1] * np.sqrt(252) * 100
-    vol_state = "high_vol" if hv21 > hv_median * 1.3 else "low_vol" if hv21 < hv_median * 0.7 else "neutral"
-    _s("Volatilidad", "Volatilidad histórica 21d", hv21, vol_state,
-       f"HV21={hv21:.1f}% (mediana={hv_median:.1f}%)")
+    hv21     = _log_return(c, 1).rolling(21).std().iloc[-1] * np.sqrt(252) * 100
+    hv_med   = _log_return(c, 1).rolling(21).std().rolling(252).median().iloc[-1] * np.sqrt(252) * 100
+    vol_state = "high_vol" if hv21 > hv_med * 1.3 else "low_vol" if hv21 < hv_med * 0.7 else "neutral"
+    _s("Volatility", "Historical Vol 21d", hv21, vol_state,
+       f"HV21={hv21:.1f}%  (median={hv_med:.1f}%)")
 
     kelt_pct = _keltner_pct(h, lo, c, 20, 10, 2.0).iloc[-1] * 100
     kelt_state = "overbought" if kelt_pct > 100 else "oversold" if kelt_pct < 0 else "neutral"
-    _s("Volatilidad", "Canal Keltner %", kelt_pct, kelt_state,
-       f"Posición en canal: {kelt_pct:.0f}%")
+    _s("Volatility", "Keltner Channel %", kelt_pct, kelt_state,
+       f"Position in channel: {kelt_pct:.0f}%")
 
     # ── VOLUME ────────────────────────────────────────────────────────────────
     if v is not None and v.notna().sum() > 50:
         v_z = ((v - v.rolling(21).mean()) / (v.rolling(21).std() + 1e-9)).iloc[-1]
         vol_sig = "high_vol" if v_z > 1.5 else "low_vol" if v_z < -1.5 else "neutral"
-        _s("Volumen", "Z-score Volumen 21d", v_z, vol_sig,
-           f"Z={v_z:.2f} ({'Volumen alto' if v_z > 1.5 else 'Volumen bajo' if v_z < -1.5 else 'Volumen normal'})")
+        _s("Volume", "Volume Z-score 21d", v_z, vol_sig,
+           f"Z={v_z:.2f} ({'High volume' if v_z > 1.5 else 'Low volume' if v_z < -1.5 else 'Normal volume'})")
 
         cmf20_v = _cmf(h, lo, c, v, 20).iloc[-1]
         cmf_state = "bullish" if cmf20_v > 0.05 else "bearish" if cmf20_v < -0.05 else "neutral"
-        _s("Volumen", "CMF(20)", cmf20_v, cmf_state,
-           f"CMF={cmf20_v:.3f} ({'Presión compradora' if cmf_state == 'bullish' else 'Presión vendedora' if cmf_state == 'bearish' else 'Neutral'})")
+        _s("Volume", "CMF(20)", cmf20_v, cmf_state,
+           f"CMF={cmf20_v:.3f} ({'Buying pressure' if cmf_state == 'bullish' else 'Selling pressure' if cmf_state == 'bearish' else 'Neutral'})")
 
         mfi14_v = _mfi(h, lo, c, v, 14).iloc[-1]
         mfi_state = "overbought" if mfi14_v > 80 else "oversold" if mfi14_v < 20 else "neutral"
-        _s("Volumen", "MFI(14)", mfi14_v, mfi_state,
-           f"MFI={mfi14_v:.1f} ({'Sobrecompra' if mfi14_v > 80 else 'Sobreventa' if mfi14_v < 20 else 'Neutral'})")
+        _s("Volume", "MFI(14)", mfi14_v, mfi_state,
+           f"MFI={mfi14_v:.1f} ({'Overbought' if mfi14_v > 80 else 'Oversold' if mfi14_v < 20 else 'Neutral'})")
 
-    # ── LOCAL PIVOTS ──────────────────────────────────────────────────────────
+    # ── PIVOTS ────────────────────────────────────────────────────────────────
     res20 = h.rolling(20).max().shift(1).iloc[-1]
     sup20 = lo.rolling(20).min().shift(1).iloc[-1]
     dist_res = (last_c - res20) / last_c * 100
     dist_sup = (last_c - sup20) / last_c * 100
     pivot_state = "near_resistance" if dist_res > -1.0 else \
                   "near_support"    if dist_sup < 1.0  else "middle"
-    _s("Pivotes", "Resistencia 20d", dist_res, pivot_state,
-       f"Distancia resistencia: {dist_res:+.1f}%")
-    _s("Pivotes", "Soporte 20d", dist_sup, pivot_state,
-       f"Distancia soporte: {dist_sup:+.1f}%")
+    _s("Pivots", "Resistance 20d", dist_res, pivot_state,
+       f"Distance to resistance: {dist_res:+.1f}%")
+    _s("Pivots", "Support 20d", dist_sup, pivot_state,
+       f"Distance to support: {dist_sup:+.1f}%")
 
     ph = h.shift(1).iloc[-1]
     pl = lo.shift(1).iloc[-1]
     pc_prev = c.shift(1).iloc[-1]
     piv_point = (ph + pl + pc_prev) / 3
     dist_piv = (last_c - piv_point) / last_c * 100
-    _s("Pivotes", "Punto Pivote", dist_piv,
+    _s("Pivots", "Pivot Point", dist_piv,
        "bullish" if dist_piv > 0 else "bearish",
-       f"Precio {'encima' if dist_piv > 0 else 'debajo'} del pivote ({dist_piv:+.1f}%)")
+       f"Price {'above' if dist_piv > 0 else 'below'} pivot ({dist_piv:+.1f}%)")
 
     return states

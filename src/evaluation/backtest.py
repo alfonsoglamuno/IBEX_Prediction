@@ -2,11 +2,22 @@
 Walk-forward validation and realistic backtesting.
 
 Protocol:
-  - Strictly time-ordered (no shuffling)
-  - Expanding train window
+  - Strictly time-ordered (no shuffling, no future data in any fold)
+  - Two modes (config: walk_forward.max_train_months):
+      expanding  — train window grows with each fold (default, max_train_months=null)
+      rolling    — fixed-size train window (max_train_months=N), more responsive
+                   to regime changes; preferred in non-stationary financial data
   - Configurable step and validation window
-  - Daily PnL uses 1-day forward return (not 5-day)
-  - Transaction costs on each position change
+  - Daily PnL uses 1-day forward return (target_ret_1d) — not 5d, not contemporaneous
+  - Transaction costs on each position change (default 10 bps one-way)
+
+Literature note on COVID (2020):
+  Recent papers (2022-2025) generally recommend *including* the COVID period in
+  training because it represents a genuine extreme-risk regime.  Excluding it
+  creates an overly optimistic in-sample volatility and a training set that has
+  never seen a tail event.  A rolling window (3-4 years) naturally down-weights
+  pre-2020 data without discarding it entirely.
+  Reference: Giantsidi & Tarantola (2025) deep-learning financial forecasting review.
 """
 from __future__ import annotations
 
@@ -39,12 +50,17 @@ def walk_forward_cv(
     initial_train_months: int | None = None,
     step_months: int | None = None,
     val_months: int | None = None,
+    max_train_months: int | None = None,
     min_confidence: float | None = None,
     transaction_cost_bps: float | None = None,
     verbose: bool = True,
 ) -> WalkForwardResult:
     """
-    Expanding-window walk-forward cross-validation.
+    Walk-forward cross-validation with expanding or rolling train window.
+
+    Modes:
+      max_train_months=None  -> expanding window (train on all history up to fold)
+      max_train_months=N     -> rolling window   (only last N months of history)
 
     For classification:
       - ML metrics: accuracy, F1, ROC-AUC, PR-AUC
@@ -58,10 +74,16 @@ def walk_forward_cv(
     init_m   = initial_train_months or cfg_wf.get("initial_train_months", 36)
     step_m   = step_months or cfg_wf.get("step_months", 3)
     val_m    = val_months  or cfg_wf.get("val_months", 3)
+    max_tr_m = max_train_months if max_train_months is not None \
+               else cfg_wf.get("max_train_months")   # None = expanding
     tc_bps   = transaction_cost_bps if transaction_cost_bps is not None \
                else get("backtest.transaction_cost_bps", 10)
     min_conf = min_confidence if min_confidence is not None \
                else get("backtest.min_confidence", 0.55)
+
+    mode = "rolling" if max_tr_m else "expanding"
+    log.info(f"Walk-forward mode: {mode}"
+             + (f" ({max_tr_m}m window)" if max_tr_m else ""))
 
     feat_cols = [col for col in df_feat.columns if not col.startswith("target_")]
     X     = df_feat[feat_cols].values
@@ -79,9 +101,15 @@ def walk_forward_cv(
     iterable = tqdm(fold_starts, desc=f"Walk-forward [{target}]") if verbose else fold_starts
 
     for fold_start in iterable:
-        fold_end   = fold_start + pd.DateOffset(months=val_m)
-        train_mask = dates < fold_start
-        val_mask   = (dates >= fold_start) & (dates < fold_end)
+        fold_end  = fold_start + pd.DateOffset(months=val_m)
+        val_mask  = (dates >= fold_start) & (dates < fold_end)
+
+        # Rolling window: clamp train start to last max_tr_m months before fold
+        if max_tr_m:
+            train_start = fold_start - pd.DateOffset(months=max_tr_m)
+            train_mask  = (dates >= train_start) & (dates < fold_start)
+        else:
+            train_mask  = dates < fold_start
 
         if train_mask.sum() < 50 or val_mask.sum() < 5:
             continue
