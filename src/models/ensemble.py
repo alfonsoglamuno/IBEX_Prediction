@@ -55,6 +55,7 @@ def make_ensemble() -> Pipeline:
 
 # ── Model persistence ─────────────────────────────────────────────────────────
 
+import json
 import joblib
 from pathlib import Path
 from src.utils.config import root
@@ -95,7 +96,28 @@ def _load_bundle(name: str, target: str) -> dict:
 
 
 def best_available_model(target: str):
-    """Load the best model for a given target (prefers ensemble > xgboost > lgbm)."""
+    """
+    Load the walk-forward champion model for target.
+
+    Selection priority:
+      1. champion.json (written by train.py after model comparison)
+      2. Fallback preference order: ensemble > xgboost > lgbm > random_forest > logistic
+    """
+    # Check champion registry first
+    champion_path = root() / "results" / "champion.json"
+    if champion_path.exists():
+        try:
+            with open(champion_path) as f:
+                champions = json.load(f)
+            if target in champions:
+                name = champions[target]["model"]
+                log.info(f"Champion model for {target}: {name} "
+                         f"(AUC={champions[target].get('roc_auc', '?'):.4f})")
+                return load_model(name, target), name
+        except Exception as exc:
+            log.debug(f"Could not read champion.json: {exc}")
+
+    # Fallback: first model file that exists
     for name in ["ensemble", "xgboost", "lgbm", "random_forest", "logistic"]:
         try:
             return load_model(name, target), name

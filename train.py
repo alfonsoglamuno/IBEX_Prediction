@@ -156,6 +156,52 @@ def _retrain_and_save(df: pd.DataFrame, target: str, task: str,
     save_model(model, model_name, target, feature_names=feat_c)
 
 
+def select_champion(all_results: dict[str, dict]) -> dict:
+    """
+    Given {target: {model_name: summary_metrics}}, select the best model per target
+    and write results/champion.json.
+
+    Selection metric: roc_auc (primary) + bt_sharpe (tiebreaker).
+    For regression targets: uses ic (information coefficient).
+    """
+    champions: dict = {}
+    for target, model_results in all_results.items():
+        task = TASK_MAP.get(target, "classification")
+        best_name, best_score, best_metrics = None, -999.0, {}
+
+        for model_name, metrics in model_results.items():
+            if not metrics:
+                continue
+            if task == "classification":
+                # Combined score: 60% AUC + 40% Sharpe (normalised to [0,1] range)
+                auc    = metrics.get("roc_auc", 0.5)
+                sharpe = metrics.get("bt_sharpe", 0.0)
+                score  = 0.6 * auc + 0.4 * max(0.0, min(sharpe / 3.0, 1.0))
+            else:
+                score = metrics.get("ic", 0.0)
+
+            if score > best_score:
+                best_score, best_name, best_metrics = score, model_name, metrics
+
+        if best_name:
+            champions[target] = {
+                "model":      best_name,
+                "score":      round(best_score, 6),
+                "roc_auc":    round(best_metrics.get("roc_auc", 0.0), 6),
+                "bt_sharpe":  round(best_metrics.get("bt_sharpe", 0.0), 4),
+                "selected_at": str(pd.Timestamp.now().date()),
+            }
+            log.info(f"Champion [{target}]: {best_name:15s}  "
+                     f"AUC={champions[target]['roc_auc']:.4f}  "
+                     f"Sharpe={champions[target]['bt_sharpe']:.3f}")
+
+    champion_path = root() / "results" / "champion.json"
+    with open(champion_path, "w") as f:
+        json.dump(champions, f, indent=2)
+    log.info(f"Champion models saved -> {champion_path}")
+    return champions
+
+
 def main():
     args         = parse_args()
     use_multiasset = not args.no_multiasset
@@ -178,8 +224,22 @@ def main():
     # ── 4. Train ──────────────────────────────────────────────────────────────
     targets = ALL_TARGETS if args.all_targets else [args.target]
 
+    all_results: dict[str, dict] = {}
     for target in targets:
-        train_target(df, target, models_to_run)
+        all_results[target] = train_target(df, target, models_to_run)
+
+    # ── 5. Auto-select champion model per target ───────────────────────────────
+    if len(all_results) > 0 and len(models_to_run) > 1:
+        champions = select_champion(all_results)
+        print("\n" + "=" * 55)
+        print("  MODEL SELECTION RESULTS")
+        print("=" * 55)
+        for target, ch in champions.items():
+            print(f"  {target:25s}  champion={ch['model']:15s}  "
+                  f"AUC={ch['roc_auc']:.4f}  Sharpe={ch['bt_sharpe']:.3f}")
+        print("=" * 55)
+        print("\nRun: python predict.py --shap")
+        print("The champion model will be used automatically.\n")
 
 
 if __name__ == "__main__":

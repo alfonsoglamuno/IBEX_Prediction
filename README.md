@@ -11,21 +11,26 @@ A walk-forward machine learning system for predicting the direction of the IBEX3
 ```bash
 pip install -r requirements.txt
 
-# 1. Train models (data is downloaded automatically)
-python train.py --model xgboost       --target target_dir_1d --no-multiasset
-python train.py --model lgbm          --target target_dir_1d --no-multiasset
-python train.py --model logistic      --target target_dir_1d --no-multiasset
-python train.py --model random_forest --target target_dir_1d --no-multiasset
-python train.py --model xgboost       --target target_dir_5d --no-multiasset
+# 1. Train all models + auto-select champion (data downloaded automatically)
+python train.py --all-targets
+# Trains XGBoost, LightGBM, LogReg, RF, Ensemble for each target.
+# Compares by walk-forward AUC + Sharpe. Saves best to results/champion.json.
 
-# 2. Generate latest signal + SHAP drivers
-python predict.py --no-multiasset --shap
+# 2. Generate latest signal + SHAP drivers  (uses champion model automatically)
+python predict.py --shap
 
 # 3. Launch dashboard
 streamlit run app/dashboard.py        # http://localhost:8501
 
 # 4. (optional) Start REST API
 uvicorn app.api:app --reload --port 8000  # http://localhost:8000/docs
+```
+
+To retrain a specific model or target:
+```bash
+python train.py --model xgboost --target target_dir_1d
+python train.py --model ensemble
+python predict.py --model xgboost   # override champion for this run
 ```
 
 ---
