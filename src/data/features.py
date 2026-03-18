@@ -184,10 +184,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         cols[f"ret_lag{lag}"] = daily_lr.shift(lag)
 
     # ── 2. Rolling statistics ─────────────────────────────────────────────────
+    # Note: ret_std_*d removed — identical to hv_*d / sqrt(252), fully redundant.
     for w in cfg_wins:
         roll = daily_lr.rolling(w)
         cols[f"ret_mean_{w}d"] = roll.mean()
-        cols[f"ret_std_{w}d"]  = roll.std()
         cols[f"ret_skew_{w}d"] = roll.skew()
         cols[f"hl_ratio_{w}d"] = (h.rolling(w).max() - lo.rolling(w).min()) / (c.rolling(w).mean() + 1e-9)
 
@@ -195,7 +195,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # CATEGORY 1 — TREND indicators
     # ═══════════════════════════════════════════════════════════════════════════
 
-    for p in [5, 10, 20, 50, 100, 200]:
+    # SMA 5/10 removed: highly correlated with ret_mean_5d/10d (r > 0.97)
+    for p in [20, 50, 100, 200]:
         sma = c.rolling(p).mean()
         cols[f"sma{p}_dist"] = (c - sma) / (sma + 1e-9)
 
@@ -333,15 +334,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     magnitude  = (10 ** np.floor(np.log10(exp_median.clip(lower=1)))).fillna(1000)
     cols["dist_round_level"] = (c - (c / magnitude).round() * magnitude) / (c + 1e-9)
 
-    # ── 6. Calendar features ─────────────────────────────────────────────────
-    cols["dow"]          = pd.Series(df.index.dayofweek.astype(float),   index=df.index)
-    cols["month"]        = pd.Series(df.index.month.astype(float),       index=df.index)
-    cols["is_month_end"] = pd.Series(df.index.is_month_end.astype(float),index=df.index)
-    cols["week_of_year"] = pd.Series(
-        df.index.isocalendar().week.astype(float).values, index=df.index
-    )
+    # Calendar features removed (aggregate XGBoost importance < 0.03; day-of-week
+    # and monthly effects are largely arbitraged away in modern equity markets).
 
-    # ── 7. Volatility regime context ─────────────────────────────────────────
+    # ── 6. Volatility regime context ─────────────────────────────────────────
     rv_21 = daily_lr.rolling(21).std() * np.sqrt(252)
     cols["rv_21"]      = rv_21
     cols["rv_slope10"] = rv_21.diff(10)
