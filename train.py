@@ -22,7 +22,6 @@ import pandas as pd
 from src.data.fetch import load_raw
 from src.data.features import build_features, feature_cols
 from src.data.multiasset import fetch_multiasset_features
-from src.data.sentiment import fetch_sentiment_features
 from src.evaluation.backtest import walk_forward_cv
 from src.evaluation.metrics import print_metrics
 from src.models.baseline import get_model, REGISTRY
@@ -57,7 +56,11 @@ def parse_args():
 
 def build_full_feature_matrix(df_raw: pd.DataFrame,
                                use_multiasset: bool = True) -> pd.DataFrame:
-    """Build feature matrix with optional multi-asset and sentiment features."""
+    """Build feature matrix with optional multi-asset and sentiment features.
+
+    Sentiment is handled inside build_features() when include_sentiment: true.
+    Multi-asset features are appended here separately.
+    """
     df = build_features(df_raw)
 
     if use_multiasset and get("multiasset.enabled", True):
@@ -65,12 +68,6 @@ def build_full_feature_matrix(df_raw: pd.DataFrame,
         if not ma.empty:
             df = df.join(ma, how="left")
             log.info(f"Added {ma.shape[1]} multi-asset features")
-
-    if get("features.include_sentiment", False):
-        sent = fetch_sentiment_features(df.index)
-        if not sent.empty:
-            df = df.join(sent, how="left")
-            log.info(f"Added {sent.shape[1]} sentiment features")
 
     return df
 

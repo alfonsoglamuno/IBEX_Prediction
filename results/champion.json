@@ -1,16 +1,16 @@
 {
   "target_dir_1d": {
-    "model": "random_forest",
-    "score": 0.317517,
-    "roc_auc": 0.522479,
-    "bt_sharpe": 0.0302,
+    "model": "xgboost_cal",
+    "score": 0.449481,
+    "roc_auc": 0.566193,
+    "bt_sharpe": 0.8232,
     "selected_at": "2026-03-18"
   },
   "target_dir_5d": {
-    "model": "xgboost",
-    "score": 0.386065,
-    "roc_auc": 0.579034,
-    "bt_sharpe": 0.2898,
+    "model": "xgboost_cal",
+    "score": 0.545378,
+    "roc_auc": 0.607287,
+    "bt_sharpe": 1.3575,
     "selected_at": "2026-03-18"
   }
 }
