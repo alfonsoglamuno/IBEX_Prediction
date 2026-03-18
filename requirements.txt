@@ -35,6 +35,11 @@ python-dotenv>=1.0.0
 requests>=2.31.0
 feedparser>=6.0.0
 
+# Sentiment (V2) — optional; install to activate transformer-based scoring
+# transformers>=4.40.0
+# sentencepiece>=0.2.0     # required by some multilingual models
+# accelerate>=0.29.0       # optional: faster GPU inference
+
 # Dev
 pytest>=8.0.0
 jupyterlab>=4.0.0

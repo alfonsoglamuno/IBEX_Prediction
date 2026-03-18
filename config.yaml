@@ -26,7 +26,27 @@ features:
   windows: [5, 10, 21, 63]
   include_volume: true
   include_multiasset: true
-  include_sentiment: false     # set true after V2 setup
+  # Sentiment: active by default. Uses TWO-TRACK design:
+  #   Track A — full history (include_sentiment: false): price/vol/macro features only
+  #   Track B — sentiment era (include_sentiment: true): restricted to start_date onward
+  # Run both to measure incremental value. Never compare them on different periods.
+  include_sentiment: true
+
+sentiment:
+  # First date with trustworthy RSS/archive coverage.
+  # Dates before this are treated as NaN (archive unavailable), NOT 0 (no news).
+  # Set this to the earliest date where you have: enough articles per day,
+  # stable source mix, usable timestamps, and low duplication.
+  # Default: 2016-01-01 — adjust based on actual archive coverage.
+  start_date: "2016-01-01"
+  days_back: 365               # how many days of news to load on each run
+  lang: "es"                   # primary language: "es" | "en"
+  backend: "auto"              # "auto" | "transformer" | "keyword"
+  # Composite layer weights: IndexSent = α·direct + β·rollup + γ·macro
+  # Literature basis: Tetlock (2007), Garcia (2013), Groß-Klußmann & Hautsch (2011)
+  alpha: 0.50                  # direct IBEX35 mentions (highest priority)
+  beta:  0.30                  # constituent roll-up (index-weight adjusted)
+  gamma: 0.20                  # macro EU/Spain (ECB, rates, eurozone)
 
 targets:
   direction_1d: true

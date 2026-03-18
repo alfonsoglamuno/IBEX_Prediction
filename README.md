@@ -184,11 +184,41 @@ pip install -r requirements.txt
 
 ---
 
+## Sentiment pipeline
+
+Three-layer composite aligned with Tetlock (2007) / Loughran & McDonald (2011):
+
+| Layer | Weight | Description |
+|-------|--------|-------------|
+| Direct IBEX | α = 0.50 | Articles mentioning IBEX35 / bolsa española |
+| Constituent roll-up | β = 0.30 | Company news weighted by index weight |
+| Macro EU/Spain | γ = 0.20 | ECB, rates, eurozone articles |
+
+**Per-article weight:** `w_i = w_rel · w_src · w_time · w_novelty`
+- `w_rel`: relevance score from entity classification
+- `w_src`: source credibility (Reuters=1.0, Expansión=0.85, general press=0.65)
+- `w_time`: exponential decay with 18h half-life (Da et al. 2011)
+- `w_novelty`: 1/√rank within same topic per day (Chan 2003)
+
+**Two-track design** (coverage integrity principle):
+
+| Track | Config | Period | Purpose |
+|-------|--------|--------|---------|
+| A | `include_sentiment: false` | Full history 2007–today | Price/vol/regime baseline |
+| B | `include_sentiment: true` | `sentiment_start_date` onwards | Base vs base+sentiment ablation |
+
+Dates before `sentiment.start_date` are `NaN` (archive unavailable), not `0` (no news).
+Only run Track A vs Track B on the **same date range** to measure incremental value.
+
+Set `sentiment.start_date` to the earliest date with trustworthy, stable RSS coverage.
+
+---
+
 ## Roadmap
 
 | Phase | Status | Description |
 |-------|--------|-------------|
 | V1 | Done | XGBoost · LightGBM · LogReg · RF · walk-forward · SHAP · dashboard · API |
-| V2 | Stub ready | Spanish news sentiment (FinBERT / RoBERTa-ES) |
+| V2 | Done | Three-layer sentiment (keyword fallback + optional transformers) · operative summary |
 | V3 | Scaffold | Probabilistic / quantile forecasting + LSTM |
 | V4 | Planned | Reinforcement learning agent (ABIDES-style) |

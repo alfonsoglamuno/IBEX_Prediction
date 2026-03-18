@@ -205,11 +205,27 @@ IBEX35_CONSTITUENTS: dict[str, dict] = {
     },
 }
 
+import re as _re
+
 # ── Flat lookup: any keyword/ticker → (company_name, weight) ─────────────────
+# Short keywords (≤4 chars) get word-boundary matching to avoid false positives
+# e.g. "ANA" (Acciona) must not match "semana", "banana", etc.
 _CONSTITUENT_LOOKUP: dict[str, tuple[str, float]] = {}
+_SHORT_KEYWORDS: set[str] = set()   # require word-boundary match
+
 for _name, _info in IBEX35_CONSTITUENTS.items():
     for _kw in _info["names_es"] + _info["names_en"] + _info["tickers"]:
-        _CONSTITUENT_LOOKUP[_kw.lower()] = (_name, _info["weight"])
+        _kw_lower = _kw.lower()
+        _CONSTITUENT_LOOKUP[_kw_lower] = (_name, _info["weight"])
+        if len(_kw_lower) <= 4:
+            _SHORT_KEYWORDS.add(_kw_lower)
+
+
+def _kw_in_text(kw: str, text_lower: str) -> bool:
+    """Return True if kw appears as a standalone token in text_lower."""
+    if kw in _SHORT_KEYWORDS:
+        return bool(_re.search(r"\b" + _re.escape(kw) + r"\b", text_lower))
+    return kw in text_lower
 
 
 def classify_article(text: str) -> dict:
@@ -221,6 +237,7 @@ def classify_article(text: str) -> dict:
       - Constituent: relevance proportional to index weight
       - Macro: bounded at 0.6 (indirect, diffuse effect)
       - Multiple keyword matches increase confidence (sum-based)
+      - Short tickers (≤4 chars) use word-boundary matching to avoid false positives.
 
     Returns:
         target_type       : 'index' | 'constituent' | 'macro' | 'irrelevant'
@@ -243,7 +260,7 @@ def classify_article(text: str) -> dict:
     # Constituent mentions — pick the highest-weight company found
     best_name, best_weight = None, 0.0
     for kw, (comp, weight) in _CONSTITUENT_LOOKUP.items():
-        if kw in text_lower and weight > best_weight:
+        if _kw_in_text(kw, text_lower) and weight > best_weight:
             best_name, best_weight = comp, weight
 
     if best_name is not None:
