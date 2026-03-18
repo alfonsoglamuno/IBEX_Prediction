@@ -30,9 +30,12 @@ def _unwrap_pipeline(model):
     from sklearn.calibration import CalibratedClassifierCV
     from sklearn.ensemble import StackingClassifier
 
-    # CalibratedClassifierCV wraps a pipeline
+    # CalibratedClassifierCV: .estimator is UNFITTED; use calibrated_classifiers_ for the fitted one
     if isinstance(model, CalibratedClassifierCV):
-        model = model.estimator
+        if hasattr(model, "calibrated_classifiers_") and model.calibrated_classifiers_:
+            model = model.calibrated_classifiers_[0].estimator
+        else:
+            model = model.estimator
     if isinstance(model, Pipeline):
         scaler = dict(model.steps).get("scaler", None)
         clf    = model.steps[-1][1]

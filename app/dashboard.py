@@ -301,7 +301,7 @@ with t_signal:
                     yaxis_range=[0, 100], showlegend=False,
                     yaxis_title="Probability (%)",
                 )
-                st.plotly_chart(fig_bar, use_container_width=True)
+                st.plotly_chart(fig_bar, width="stretch", key=f"sig_bar_{key}")
 
         st.divider()
 
@@ -325,7 +325,7 @@ with t_signal:
                 height=320, margin=dict(t=10, b=0, l=0, r=0),
                 showlegend=False, coloraxis_showscale=False,
             )
-            st.plotly_chart(fig_d, use_container_width=True)
+            st.plotly_chart(fig_d, width="stretch", key=f"sig_shap_{key}")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -399,7 +399,7 @@ with t_market:
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
     fig.update_xaxes(showgrid=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch", key="market_candle")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -478,7 +478,7 @@ with t_indicators:
             height=360, margin=dict(t=10, b=0, l=0, r=0),
             legend=dict(orientation="h"),
         )
-        st.plotly_chart(fig_ind, use_container_width=True)
+        st.plotly_chart(fig_ind, width="stretch", key="ind_feature_explorer")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -496,7 +496,7 @@ with t_explain:
         "Target", ["target_dir_1d", "target_dir_5d"], key="exp_target",
     )
     model_exp  = col_sel2.selectbox(
-        "Model", ["xgboost", "lgbm", "random_forest", "logistic"], key="exp_model",
+        "Model", ["xgboost_cal", "xgboost", "lgbm", "random_forest", "logistic"], key="exp_model",
     )
 
     if st.button("Compute SHAP (~30s)", type="primary"):
@@ -523,7 +523,7 @@ with t_explain:
                     )
                     fig_imp.update_layout(height=600, margin=dict(t=10, b=0, l=0, r=0),
                                           coloraxis_showscale=False)
-                    st.plotly_chart(fig_imp, use_container_width=True)
+                    st.plotly_chart(fig_imp, width="stretch", key="shap_global_imp")
 
                 with col_water:
                     st.markdown("**Latest prediction drivers (waterfall)**")
@@ -545,7 +545,7 @@ with t_explain:
                         xaxis_title="SHAP impact (green=bullish, red=bearish)",
                         yaxis_title="",
                     )
-                    st.plotly_chart(fig_wf, use_container_width=True)
+                    st.plotly_chart(fig_wf, width="stretch", key="shap_waterfall")
 
                 with st.expander("Full feature table"):
                     st.dataframe(df_shap_latest.round(4), use_container_width=True)
@@ -645,7 +645,7 @@ with t_results:
                 yaxis_range=[0, 1], yaxis_title="P(up)",
                 legend=dict(orientation="h"),
             )
-            st.plotly_chart(fig_pred, use_container_width=True)
+            st.plotly_chart(fig_pred, width="stretch", key="res_pred_timeline")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -707,6 +707,6 @@ with t_backtest:
                 legend=dict(orientation="h"),
                 title="Out-of-sample equity curve (walk-forward, after costs)",
             )
-            st.plotly_chart(fig_eq, use_container_width=True)
+            st.plotly_chart(fig_eq, width="stretch", key="bt_equity_curve")
         else:
             st.info("Run `python train.py` to generate predictions.")
