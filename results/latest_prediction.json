@@ -1,11 +1,18 @@
 {
   "target_dir_1d": {
     "date": "2026-03-17",
+    "horizon": "1d",
     "model": "xgboost_cal",
     "prob_up": 0.5269,
     "prob_down": 0.4731,
     "signal": "NEUTRAL",
     "confidence": "LOW",
+    "signal_thresholds": {
+      "mode": "percentile",
+      "signal_pct": 0.75,
+      "up_threshold": 0.535282,
+      "down_threshold": 0.506199
+    },
     "generated_at": "2026-03-18",
     "top_drivers": [
       {
@@ -62,11 +69,18 @@
   },
   "target_dir_5d": {
     "date": "2026-03-17",
+    "horizon": "5d",
     "model": "xgboost_cal",
     "prob_up": 0.5331,
     "prob_down": 0.4669,
     "signal": "NEUTRAL",
     "confidence": "LOW",
+    "signal_thresholds": {
+      "mode": "percentile",
+      "signal_pct": 0.75,
+      "up_threshold": 0.576161,
+      "down_threshold": 0.512526
+    },
     "generated_at": "2026-03-18",
     "top_drivers": [
       {
