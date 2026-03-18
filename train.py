@@ -114,10 +114,17 @@ def train_target(df: pd.DataFrame, target: str, models_to_run: list[str]) -> dic
             result.all_predictions.to_parquet(pred_path)
             all_preds[model_name] = result.all_predictions
 
-            # ── Compute percentile signal thresholds from OOS probs ───────────
+            # ── Optimise signal threshold on OOS probabilities ────────────────
             if "y_prob" in result.all_predictions.columns:
-                _save_signal_thresholds(target, model_name,
-                                        result.all_predictions["y_prob"])
+                ret_col  = "target_ret_1d" if "target_ret_1d" in df_t.columns else None
+                oos_rets = (df_t[ret_col].reindex(result.all_predictions.index).fillna(0)
+                            if ret_col else
+                            pd.Series(0.0, index=result.all_predictions.index))
+                _optimize_and_save_threshold(
+                    target, model_name,
+                    result.all_predictions["y_prob"],
+                    oos_rets,
+                )
 
         # ── Retrain on full data and save model ───────────────────────────────
         _retrain_and_save(df_t, target, task, model_name, make_fn)
@@ -159,20 +166,79 @@ def _retrain_and_save(df: pd.DataFrame, target: str, task: str,
     save_model(model, model_name, target, feature_names=feat_c)
 
 
-def _save_signal_thresholds(target: str, model_name: str, probs: pd.Series) -> None:
-    """
-    Compute percentile-based UP/DOWN thresholds from OOS walk-forward probabilities
-    and persist to results/signal_thresholds.json.
+def _apply_costs_np(positions: np.ndarray, returns: np.ndarray, cost_bps: float) -> np.ndarray:
+    cost   = cost_bps / 10_000
+    trades = np.abs(np.diff(positions, prepend=0.0))
+    return positions * returns - trades * cost
 
-    Thresholds are model-specific: a calibrated model (std≈0.04) has tight thresholds
-    while an uncalibrated model (std≈0.15) has wide ones. Both correctly represent
-    "top quartile of this model's own conviction distribution".
+
+def _optimize_and_save_threshold(
+    target: str,
+    model_name: str,
+    probs: pd.Series,
+    returns: pd.Series,
+    tc_bps: float | None = None,
+    opt_split: float | None = None,
+) -> None:
     """
-    pct         = get("signal.percentile", 0.75)
-    probs_clean = probs.dropna()
-    if len(probs_clean) < 50:
-        log.warning(f"Too few OOS samples ({len(probs_clean)}) to compute thresholds for {target}_{model_name}")
+    Find the probability percentile threshold that maximises walk-forward Sharpe
+    on the first opt_split fraction of OOS predictions, then validate on the rest.
+
+    The optimisation sweeps the *percentile* (0.55→0.96) rather than a raw
+    probability, so the threshold automatically adapts to each model's own
+    probability distribution (critical for calibrated models whose probs cluster
+    near 0.50).
+
+    Anti-overfitting guard: thresholds are computed on the FULL OOS distribution
+    after selecting the best percentile on the optimisation split only.
+    """
+    if tc_bps    is None: tc_bps    = get("backtest.transaction_cost_bps", 10)
+    if opt_split is None: opt_split = get("signal.opt_split", 0.60)
+
+    probs_c = probs.dropna()
+    rets_c  = returns.reindex(probs_c.index).fillna(0)
+
+    if len(probs_c) < 100:
+        log.warning(f"Too few OOS samples ({len(probs_c)}) — skipping optimisation for {target}_{model_name}")
         return
+
+    n_opt      = int(len(probs_c) * opt_split)
+    p_opt      = probs_c.iloc[:n_opt].values
+    r_opt      = rets_c.iloc[:n_opt].values
+    p_hold     = probs_c.iloc[n_opt:].values
+    r_hold     = rets_c.iloc[n_opt:].values
+
+    best_sharpe, best_pct = -np.inf, 0.75
+    sweep_log = []
+
+    for pct in np.arange(0.55, 0.961, 0.005):
+        up_thr   = float(np.percentile(p_opt, pct * 100))
+        down_thr = float(np.percentile(p_opt, (1 - pct) * 100))
+
+        pos       = np.where(p_opt >= up_thr, 1.0, 0.0)
+        sr        = _apply_costs_np(pos, r_opt, tc_bps)
+        ann_vol   = sr.std() * np.sqrt(252)
+        if ann_vol < 1e-9:
+            continue
+        ann_ret = float(np.exp(sr.mean() * 252) - 1)
+        sharpe  = ann_ret / ann_vol
+
+        sweep_log.append((pct, sharpe))
+        if sharpe > best_sharpe:
+            best_sharpe = sharpe
+            best_pct    = pct
+
+    # Use FULL OOS distribution to set final thresholds (avoids split-specific bias)
+    all_p    = probs_c.values
+    up_thr   = float(np.percentile(all_p, best_pct * 100))
+    down_thr = float(np.percentile(all_p, (1 - best_pct) * 100))
+
+    # Holdout validation
+    pos_h     = np.where(p_hold >= up_thr, 1.0, 0.0)
+    sr_h      = _apply_costs_np(pos_h, r_hold, tc_bps)
+    ann_vol_h = sr_h.std() * np.sqrt(252)
+    ann_ret_h = float(np.exp(sr_h.mean() * 252) - 1)
+    sharpe_h  = ann_ret_h / ann_vol_h if ann_vol_h > 1e-9 else 0.0
 
     thresholds_path = root() / "results" / "signal_thresholds.json"
     existing: dict = {}
@@ -182,22 +248,32 @@ def _save_signal_thresholds(target: str, model_name: str, probs: pd.Series) -> N
 
     key = f"{target}_{model_name}"
     existing[key] = {
-        "up_threshold":   round(float(np.percentile(probs_clean, pct * 100)),       6),
-        "down_threshold": round(float(np.percentile(probs_clean, (1 - pct) * 100)), 6),
-        "p90":            round(float(np.percentile(probs_clean, 90)), 6),
-        "p10":            round(float(np.percentile(probs_clean, 10)), 6),
-        "p50":            round(float(np.percentile(probs_clean, 50)), 6),
-        "n_samples":      int(len(probs_clean)),
-        "signal_pct":     pct,
-        "mode":           "percentile",
+        "up_threshold":    round(up_thr,     6),
+        "down_threshold":  round(down_thr,   6),
+        "optimal_pct":     round(best_pct,   3),
+        "opt_sharpe":      round(best_sharpe, 4),
+        "holdout_sharpe":  round(sharpe_h,   4),
+        "holdout_ann_ret": round(ann_ret_h,  4),
+        "p90":             round(float(np.percentile(all_p, 90)), 6),
+        "p10":             round(float(np.percentile(all_p, 10)), 6),
+        "p50":             round(float(np.percentile(all_p, 50)), 6),
+        "n_samples":       int(len(probs_c)),
+        "n_opt":           n_opt,
+        "n_holdout":       int(len(probs_c)) - n_opt,
+        "tc_bps":          tc_bps,
+        "mode":            "optimized_percentile",
     }
     with open(thresholds_path, "w") as _f:
         json.dump(existing, _f, indent=2)
 
     t = existing[key]
-    log.info(f"Signal thresholds [{key}]: "
-             f"UP≥{t['up_threshold']:.4f}  DOWN≤{t['down_threshold']:.4f}  "
-             f"(top/bottom {(1-pct):.0%} of {t['n_samples']} OOS samples)")
+    log.info(
+        f"Threshold optimised [{key}]: "
+        f"pct={t['optimal_pct']:.2f} ({(1-best_pct):.0%} active)  "
+        f"UP≥{t['up_threshold']:.4f}  DOWN≤{t['down_threshold']:.4f}  "
+        f"opt_sharpe={t['opt_sharpe']:.3f}  holdout_sharpe={t['holdout_sharpe']:.3f}  "
+        f"tc={tc_bps}bps"
+    )
 
 
 def select_champion(all_results: dict[str, dict]) -> dict:

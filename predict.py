@@ -76,10 +76,10 @@ def predict_signal(
     prob_up = float(model.predict_proba(X_latest)[0, 1])
 
     # ── Signal thresholding ───────────────────────────────────────────────────
-    mode            = get("signal.mode", "percentile")
+    mode            = get("signal.mode", "optimized_percentile")
     thresholds_used: dict = {}
 
-    if mode == "percentile":
+    if mode in ("percentile", "optimized_percentile"):
         thr = _load_signal_thresholds(model_name, target)
         if thr:
             up_thr   = thr["up_threshold"]
@@ -100,10 +100,12 @@ def predict_signal(
                 confidence = "LOW"
 
             thresholds_used = {
-                "mode":           "percentile",
-                "signal_pct":     thr["signal_pct"],
+                "mode":           thr.get("mode", "optimized_percentile"),
+                "signal_pct":     thr.get("optimal_pct") or thr.get("signal_pct", 0.75),
+                "optimal_pct":    thr.get("optimal_pct") or thr.get("signal_pct", 0.75),
                 "up_threshold":   up_thr,
                 "down_threshold": down_thr,
+                "holdout_sharpe": thr.get("holdout_sharpe"),
             }
         else:
             log.warning(

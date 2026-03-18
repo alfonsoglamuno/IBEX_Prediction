@@ -143,6 +143,15 @@ c5.metric("Features",          f"{len(feat_c)}")
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _thr_badge(thr: dict) -> str:
+    """Return a small inline HTML badge showing optimisation holdout Sharpe if available."""
+    if thr.get("mode") == "optimized_percentile" and "holdout_sharpe" in thr:
+        sh = thr["holdout_sharpe"]
+        col = "#2e7d32" if sh > 0.5 else "#e65100" if sh > 0 else "#c62828"
+        return (f'&nbsp;·&nbsp; <span style="color:{col}">holdout Sharpe {sh:+.2f}</span>')
+    return ""
+
+
 t_summary, t_signal, t_market, t_indicators, t_explain, t_results, t_backtest = st.tabs([
     "📝 Summary", "📊 Signal", "📈 Market", "🔧 Indicators", "🧠 Explainability", "📋 Results", "💰 Backtest",
 ])
@@ -279,6 +288,7 @@ with t_signal:
                     </div>
                     <div style="font-size:12px; color:#888">
                         Confidence: <b>{conf}</b> &nbsp;·&nbsp; Model: {model_n} &nbsp;·&nbsp; {gen_at}
+                        {_thr_badge(pred.get("signal_thresholds", {}))}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -288,10 +298,13 @@ with t_signal:
                 up_thr   = thr.get("up_threshold",   0.55)
                 down_thr = thr.get("down_threshold",  0.45)
                 thr_mode = thr.get("mode", "fixed")
-                sig_pct  = thr.get("signal_pct", 0.75)
-                thr_label = (f"top/bottom {(1-sig_pct):.0%} of OOS distribution"
-                             if thr_mode == "percentile"
-                             else f"fixed threshold")
+                sig_pct  = thr.get("signal_pct") or thr.get("optimal_pct", 0.75)
+                if thr_mode == "optimized_percentile":
+                    thr_label = f"Sharpe-optimised ({(1-sig_pct):.0%} active)"
+                elif thr_mode == "percentile":
+                    thr_label = f"top/bottom {(1-sig_pct):.0%} of OOS distribution"
+                else:
+                    thr_label = "fixed threshold"
 
                 fig_bar = go.Figure(go.Bar(
                     x=["P(up)", "P(down)"],

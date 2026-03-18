@@ -107,12 +107,19 @@ models:
     meta_model: logistic
 
 signal:
-  mode: "percentile"     # "fixed" (classic 0.55 threshold) or "percentile" (rank-based)
-  percentile: 0.75       # top/bottom quartile → directional signal; middle 50% → NEUTRAL
+  mode: "optimized_percentile"  # "fixed" | "percentile" | "optimized_percentile"
+  percentile: 0.75              # fallback if optimisation unavailable
+  opt_split: 0.60               # fraction of OOS used for threshold optimisation (rest = holdout)
 
 backtest:
+  # One-way transaction cost (commission + half bid-ask spread).
+  # Realistic benchmarks:
+  #   IBEX mini futures (Meff): ~2-3 bps  (professional)
+  #   IBEX ETF via IB/Degiro:   ~8-12 bps (retail)
+  #   CFD:                      ~3-5 bps  + overnight financing if held overnight
+  # 10 bps = 20 bps round trip — conservative retail ETF assumption.
   transaction_cost_bps: 10
-  min_confidence: 0.55   # used only when signal.mode = "fixed", and for interactive backtest UI
+  min_confidence: 0.55          # used only when signal.mode = "fixed"
   position_sizing: fixed
 
 persistence:
