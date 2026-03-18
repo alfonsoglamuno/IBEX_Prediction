@@ -362,6 +362,14 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # ── Assemble DataFrame in one call (no fragmentation) ────────────────────
     out = pd.DataFrame(cols, index=df.index)
 
+    # ── Optional sentiment layer ──────────────────────────────────────────────
+    if get("features.include_sentiment", False):
+        from src.data.sentiment_features import build_sentiment_features
+        sent_df = build_sentiment_features(out.index)
+        if not sent_df.empty:
+            for col in sent_df.columns:
+                out[col] = sent_df[col]
+
     feat_cols_local = [col for col in out.columns if not col.startswith("target_")]
     before = len(out)
     out.dropna(subset=feat_cols_local, inplace=True)
