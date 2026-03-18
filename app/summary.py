@@ -71,12 +71,30 @@ _FEAT_DESCRIPTIONS: dict[str, tuple[str, str]] = {
 
 def _describe_feature(name: str, shap_value: float, feature_value: float) -> str:
     """Return a plain-English sentence describing a SHAP feature contribution."""
-    # Find matching description
-    desc, direction = "Unknown feature", "neutral"
-    for prefix, (d, di) in _FEAT_DESCRIPTIONS.items():
-        if name.startswith(prefix) or name == prefix:
-            desc, direction = d, di
-            break
+    desc, direction = None, "neutral"
+
+    # 1. Exact match
+    if name in _FEAT_DESCRIPTIONS:
+        desc, direction = _FEAT_DESCRIPTIONS[name]
+    else:
+        # 2. Prefix match (e.g. "ret_lag1_..." or "rsi14_...")
+        for prefix, (d, di) in _FEAT_DESCRIPTIONS.items():
+            if name.startswith(prefix):
+                desc, direction = d, di
+                break
+
+    # 3. Suffix/contains match for multi-asset features (e.g. brent_ret_lag5, sp500_ret_lag2)
+    if desc is None:
+        for prefix, (d, di) in _FEAT_DESCRIPTIONS.items():
+            if f"_{prefix}" in name:
+                asset = name[:name.index(f"_{prefix}")].replace("_", " ").upper()
+                desc = f"{asset}: {d}"
+                direction = di
+                break
+
+    # 4. Fallback: humanise the raw name
+    if desc is None:
+        desc = name.replace("_", " ").title()
 
     # Direction of push
     direction_of_shap = "pushes UP" if shap_value > 0 else "pushes DOWN"

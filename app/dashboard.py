@@ -221,7 +221,7 @@ with t_summary:
 
             st.dataframe(
                 df_media,
-                use_container_width=True,
+                width="stretch",
                 height=min(400, 35 + 35 * len(df_media)),
                 column_config={
                     "Score": st.column_config.NumberColumn(format="%.3f"),
@@ -548,7 +548,7 @@ with t_explain:
                     st.plotly_chart(fig_wf, width="stretch", key="shap_waterfall")
 
                 with st.expander("Full feature table"):
-                    st.dataframe(df_shap_latest.round(4), use_container_width=True)
+                    st.dataframe(df_shap_latest.round(4), width="stretch")
 
             except FileNotFoundError as e:
                 st.error(f"Model not found: {e}\n\nRun `python train.py` first.")
@@ -587,7 +587,7 @@ with t_results:
                     df_ml.style.format("{:.4f}")
                     .highlight_max(axis=0, color="#c8e6c9")
                     .highlight_min(axis=0, color="#ffcdd2"),
-                    use_container_width=True,
+                    width="stretch",
                 )
 
         with col_eco:
@@ -611,7 +611,7 @@ with t_results:
                     sty = sty.highlight_max(axis=0, subset=highlight_pos, color="#c8e6c9")
                 if highlight_neg:
                     sty = sty.highlight_min(axis=0, subset=highlight_neg, color="#c8e6c9")
-                st.dataframe(sty, use_container_width=True)
+                st.dataframe(sty, width="stretch")
 
         # Walk-forward predictions timeline
         st.markdown("**Walk-forward prediction timeline**")
@@ -754,6 +754,6 @@ with t_backtest:
             if bt_stats:
                 st.markdown("**Summary statistics (out-of-sample)**")
                 st.dataframe(pd.DataFrame(bt_stats).set_index("Model"),
-                             use_container_width=True)
+                             width="stretch")
         else:
             st.info("Run `python train.py` to generate predictions.")

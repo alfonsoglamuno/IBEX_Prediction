@@ -7,7 +7,6 @@ predictors. All features are strictly lagged (shift ≥ 1) to avoid lookahead.
 Asset groups:
   Euro-area benchmark:
     EURO STOXX 50 (^STOXX50E) — most direct regional benchmark for IBEX
-    VSTOXX proxy  (^V2TX)     — euro-area implied volatility regime
   Global macro:
     S&P 500  (^GSPC)    — global risk-on/off
     DAX      (^GDAXI)   — German / euro proxy
@@ -17,7 +16,7 @@ Asset groups:
     US 10y   (^TNX)     — macro rates / discount rate
 
 Literature basis:
-  VSTOXX and EURO STOXX 50 returns have a strong overall negative correlation;
+  EURO STOXX 50 returns have a strong negative correlation with IBEX volatility;
   using them as lagged regional factors (not contemporaneous) avoids lookahead
   while capturing euro-area regime information useful for IBEX prediction.
   (STOXX white paper; Giantsidi & Tarantola 2025 deep-learning review)
@@ -43,13 +42,12 @@ _ASSET_MAP = {
     "stoxx50": "^STOXX50E",
     "eurusd":  "EURUSD=X",
     "vix":     "^VIX",
-    "vstoxx":  "^V2TX",
     "brent":   "BZ=F",
     "usbond":  "^TNX",
 }
 
 # Assets that get level + z-score treatment (not just returns)
-_LEVEL_ASSETS = {"vix", "vstoxx"}
+_LEVEL_ASSETS = {"vix"}
 
 
 def _cache_path(name: str, start: str, end: str) -> Path:
