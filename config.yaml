@@ -29,9 +29,9 @@ features:
   # Sentiment: Track A (full history baseline) vs Track B (sentiment era ablation)
   #   Track A — include_sentiment: false  → full history 2007–today, no sentiment cols
   #   Track B — include_sentiment: true   → restricted to sentiment_start_date onward
-  # Default: false (Track A). Enable only when running the sentiment ablation study
-  # with actual historical news archive data (RSS alone is not enough).
-  include_sentiment: false
+  # Enabled (Track B): uses RSS-loaded sentiment for recent data; NaN before start_date.
+  # Rows before sentiment.start_date are dropped by dropna, restricting train to ~2016+.
+  include_sentiment: true
 
 sentiment:
   # First date with trustworthy RSS/archive coverage.
@@ -63,12 +63,11 @@ walk_forward:
   initial_train_months: 36
   step_months: 3
   val_months: 3
-  # max_train_months: null   = expanding window (default, trains on all history)
+  # max_train_months: null   = expanding window (trains on all history)
   # max_train_months: 48     = rolling 4-year window (more regime-adaptive)
-  # Literature: rolling windows of 3-5 years are preferred for non-stationary
-  # daily equity data; COVID 2020 should be included (not excluded) as it is
-  # a genuine tail-risk regime the model must learn to handle.
-  max_train_months: null
+  # Literature: rolling 3-5 year windows preferred for non-stationary daily equity data.
+  # COVID 2020 included by design (Giantsidi & Tarantola 2025 — genuine tail-risk regime).
+  max_train_months: 48
 
 models:
   logistic_regression:

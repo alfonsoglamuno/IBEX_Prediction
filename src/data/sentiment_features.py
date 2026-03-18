@@ -204,7 +204,9 @@ def build_sentiment_features(
     out["sent_direct_5d"] = composite.ewm(span=5, min_periods=1).mean()
 
     roll20 = composite.rolling(20, min_periods=5)
-    out["sent_zscore_20d"] = (composite - roll20.mean()) / (roll20.std().replace(0, np.nan))
+    # Use + 1e-9 (not replace(0, nan)) so that flat-zero periods give z-score = 0,
+    # not NaN. Replacing with NaN would drop every row when there are no articles.
+    out["sent_zscore_20d"] = (composite - roll20.mean()) / (roll20.std() + 1e-9)
     out["sent_change_1d"]  = composite.diff(1)
 
     # Lag all features by 1 trading day — no lookahead

@@ -32,7 +32,8 @@ from src.utils.logging import get_logger
 
 log = get_logger(__name__)
 
-ALL_TARGETS = ["target_dir_1d", "target_dir_5d", "target_ret_5d"]
+# target_ret_5d excluded: registry contains classifiers only; add XGBRegressor to support it
+ALL_TARGETS = ["target_dir_1d", "target_dir_5d"]
 TASK_MAP    = {
     "target_dir_1d":    "classification",
     "target_dir_5d":    "classification",
