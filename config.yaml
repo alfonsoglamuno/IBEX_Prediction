@@ -9,13 +9,17 @@ data:
 multiasset:
   enabled: true
   tickers:
-    sp500:  "^GSPC"    # S&P 500 — global risk-on/off
-    dax:    "^GDAXI"   # DAX — European proxy
-    eurusd: "EURUSD=X" # Euro strength
-    vix:    "^VIX"     # Fear index
-    brent:  "BZ=F"     # Energy / Spain exposure
-    usbond: "^TNX"     # US 10y yield — macro rates
-  lags: [1, 2, 5]      # lagged returns of each asset
+    sp500:   "^GSPC"      # S&P 500 — global risk-on/off
+    dax:     "^GDAXI"     # DAX — European proxy
+    stoxx50: "^STOXX50E"  # EURO STOXX 50 — most direct euro-area benchmark
+    eurusd:  "EURUSD=X"   # Euro strength (Spain is EUR-denominated)
+    vix:     "^VIX"       # US implied vol — fear index
+    vstoxx:  "^V2TX"      # EURO STOXX 50 implied vol (VSTOXX proxy)
+    brent:   "BZ=F"       # Energy prices (Spain energy exposure)
+    usbond:  "^TNX"       # US 10y yield — macro rates
+  lags: [1, 2, 5]         # lagged returns of each asset
+  # level_assets: tickers that get level + z-score features (not just returns)
+  level_assets: ["vix", "vstoxx"]
 
 features:
   lags: [1, 2, 3, 5, 10, 21]
@@ -38,6 +42,12 @@ walk_forward:
   initial_train_months: 36
   step_months: 3
   val_months: 3
+  # max_train_months: null   = expanding window (default, trains on all history)
+  # max_train_months: 48     = rolling 4-year window (more regime-adaptive)
+  # Literature: rolling windows of 3-5 years are preferred for non-stationary
+  # daily equity data; COVID 2020 should be included (not excluded) as it is
+  # a genuine tail-risk regime the model must learn to handle.
+  max_train_months: null
 
 models:
   logistic_regression:
