@@ -137,7 +137,7 @@ def _retrain_and_save(df: pd.DataFrame, target: str, task: str,
                       model_name: str, make_fn) -> None:
     """Retrain on 80% of data and save the final model."""
     feat_c = feature_cols(df)
-    X = df[feat_c].values
+    X = np.nan_to_num(df[feat_c].values, nan=0.0)
     y = df[target].values
 
     split_idx = int(len(X) * 0.8)

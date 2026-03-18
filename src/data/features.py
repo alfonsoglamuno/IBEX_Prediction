@@ -3,7 +3,7 @@ Feature engineering for IBEX35 forecasting.
 
 Indicator categories covered:
   1. TREND        — SMA, EMA, crossovers, ADX, trend strength
-  2. MOMENTUM     — RSI, Stochastic, Williams %R, CCI, ROC
+  2. MOMENTUM     — RSI (7/14), Stochastic, CCI, MACD
   3. VOLATILITY   — Bollinger Bands, ATR, Keltner Channels, HV
   4. VOLUME       — OBV, CMF, MFI, A/D Line, PVT
   5. LOCAL PIVOTS — Support/Resistance, swing highs/lows, pivot points
@@ -200,7 +200,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         sma = c.rolling(p).mean()
         cols[f"sma{p}_dist"] = (c - sma) / (sma + 1e-9)
 
-    for p in [8, 21, 55]:
+    for p in [8, 55]:
         ema = c.ewm(span=p, adjust=False).mean()
         cols[f"ema{p}_dist"] = (c - ema) / (ema + 1e-9)
 
@@ -217,7 +217,6 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     cols["adx14"]     = adx14
     cols["di_diff14"] = (pdi14 - ndi14) / 100.0
     cols["adx21"]     = adx21
-    cols["di_diff21"] = (pdi21 - ndi21) / 100.0
 
     for w in [10, 20, 50]:
         cols[f"lr_slope_{w}d"] = _linreg_slope(c, w)
@@ -230,7 +229,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # CATEGORY 2 — MOMENTUM indicators
     # ═══════════════════════════════════════════════════════════════════════════
 
-    for p in [7, 14, 21]:
+    for p in [7, 14]:
         cols[f"rsi_{p}"] = _rsi(c, p)
     cols["rsi14_slope5"] = _rsi(c, 14).diff(5)
 
@@ -239,12 +238,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     cols["stoch_d"]    = stoch_d
     cols["stoch_diff"] = stoch_k - stoch_d
 
-    cols["williams_r14"] = _williams_r(h, lo, c, 14)
-    cols["cci14"]        = _cci(h, lo, c, 14)
-    cols["cci20"]        = _cci(h, lo, c, 20)
-
-    for p in [5, 10, 21]:
-        cols[f"roc_{p}"] = (c / (c.shift(p) + 1e-9) - 1) * 100
+    cols["cci20"] = _cci(h, lo, c, 20)
 
     ema12      = c.ewm(span=12, adjust=False).mean()
     ema26      = c.ewm(span=26, adjust=False).mean()
@@ -267,7 +261,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     cols["boll_upper_dist"] = (c - (boll_mid + 2*boll_std)) / (c + 1e-9)
     cols["boll_lower_dist"] = (c - (boll_mid - 2*boll_std)) / (c + 1e-9)
 
-    for p in [7, 14, 21]:
+    for p in [7, 14]:
         cols[f"atr_{p}_norm"] = _atr(h, lo, c, p) / (c + 1e-9)
     cols["atr_ratio_7_21"] = _atr(h, lo, c, 7) / (_atr(h, lo, c, 21) + 1e-9)
     cols["keltner_pct"]    = _keltner_pct(h, lo, c, 20, 10, 2.0)
@@ -338,9 +332,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # and monthly effects are largely arbitraged away in modern equity markets).
 
     # ── 6. Volatility regime context ─────────────────────────────────────────
-    rv_21 = daily_lr.rolling(21).std() * np.sqrt(252)
-    cols["rv_21"]      = rv_21
-    cols["rv_slope10"] = rv_21.diff(10)
+    # rv_21 == hv_21d (identical formula); use hv[21] to avoid the duplicate column.
+    cols["rv_slope10"] = hv[21].diff(10)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # TARGET VARIABLES  (forward-looking — use ONLY as y, never as X)
@@ -354,9 +347,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     cols["target_ret_5d"]    = fwd_5d
 
     # Vol-regime labels use expanding quantiles (no lookahead into future volatility)
-    rv_q33 = rv_21.expanding(252).quantile(0.33).shift(1).ffill()
-    rv_q66 = rv_21.expanding(252).quantile(0.66).shift(1).ffill()
-    vol_regime = np.where(rv_21 < rv_q33, 0, np.where(rv_21 < rv_q66, 1, 2))
+    rv_q33 = hv[21].expanding(252).quantile(0.33).shift(1).ffill()
+    rv_q66 = hv[21].expanding(252).quantile(0.66).shift(1).ffill()
+    vol_regime = np.where(hv[21] < rv_q33, 0, np.where(hv[21] < rv_q66, 1, 2))
     cols["target_vol_regime"] = pd.Series(vol_regime, index=df.index, dtype=float)
 
     # ── Assemble DataFrame in one call (no fragmentation) ────────────────────
