@@ -13,25 +13,48 @@ pip install -r requirements.txt
 
 # 1. Train all models + auto-select champion (data downloaded automatically)
 python train.py --all-targets
-# Trains XGBoost, LightGBM, LogReg, RF, Ensemble for each target.
-# Compares by walk-forward AUC + Sharpe. Saves best to results/champion.json.
+# Trains XGBoost (+ calibrated), LightGBM, LogReg, RF, Ensemble for each target.
+# Compares by 60% walk-forward AUC + 40% Sharpe. Saves best to results/champion.json.
 
 # 2. Generate latest signal + SHAP drivers  (uses champion model automatically)
 python predict.py --shap
 
 # 3. Launch dashboard
 streamlit run app/dashboard.py        # http://localhost:8501
-
-# 4. (optional) Start REST API
-uvicorn app.api:app --reload --port 8000  # http://localhost:8000/docs
 ```
 
 To retrain a specific model or target:
 ```bash
 python train.py --model xgboost --target target_dir_1d
-python train.py --model ensemble
-python predict.py --model xgboost   # override champion for this run
+python train.py --model xgboost_cal   # calibrated XGBoost (current champion)
+python predict.py --model xgboost     # override champion for this run
 ```
+
+---
+
+## Daily morning workflow
+
+Run `morning_run.py` every morning before the IBEX35 session opens (09:00 CET):
+
+```bash
+python morning_run.py              # refresh data + predict + summary (~40s)
+python morning_run.py --no-shap    # faster run without SHAP drivers (~10s)
+python morning_run.py --retrain    # retrain models first (weekly/monthly, ~20 min)
+python morning_run.py --open-dashboard  # also launch Streamlit after running
+```
+
+**What it does:**
+1. Downloads latest market data (force-refresh Yahoo Finance cache)
+2. Runs prediction with SHAP for both 1d and 5d horizons
+3. Generates the operative summary (sentiment + narrative)
+4. Prints a morning briefing with signal, probability, and top drivers
+
+**Schedule on Windows (Task Scheduler):**
+```
+schtasks /create /tn "IBEX_Morning_Run" /tr "python morning_run.py" ^
+         /sc WEEKLY /d MON,TUE,WED,THU,FRI /st 08:30 /sd 01/01/2026 /f
+```
+Set the "Start in" directory to the project root.
 
 ---
 
@@ -41,15 +64,28 @@ Open **http://localhost:8501** after running `streamlit run app/dashboard.py`.
 
 | Tab | Contents |
 |-----|----------|
-| **📝 Summary** | **Operative summary**: plain-English narrative explaining *why* the model makes its call — top SHAP drivers, three-layer sentiment state, recent IBEX-relevant headlines with per-article scores |
-| **📊 Signal** | UP/DOWN/NEUTRAL signal with probability bars + top SHAP drivers |
+| **📝 Summary** | Operative narrative: plain-English signal explanation, top SHAP drivers, three-layer sentiment state, recent IBEX-relevant headlines with per-article scores. Click **Generate summary** or run `morning_run.py`. |
+| **📊 Signal** | UP/DOWN/NEUTRAL signal for 1d and 5d, probability bars, SHAP waterfall for latest prediction |
 | **📈 Market** | Interactive candlestick with SMA/Bollinger/support-resistance overlays and volume |
-| **🔧 Indicators** | Color-coded state badges for Trend · Momentum · Volatility · Volume · Pivots |
+| **🔧 Indicators** | Color-coded state badges for Trend · Momentum · Volatility · Volume · Pivots + feature explorer |
 | **🧠 Explainability** | On-demand SHAP: global feature importance + per-prediction waterfall |
-| **📋 Results** | Walk-forward ML metrics (accuracy, AUC, F1) + predictions timeline |
-| **💰 Backtest** | Equity curves (strategy vs buy-and-hold) with adjustable confidence threshold and costs |
+| **📋 Results** | Walk-forward ML metrics (AUC, F1, accuracy) + backtest economics + predictions timeline |
+| **💰 Backtest** | Equity curves + drawdown vs buy-and-hold, adjustable confidence threshold and transaction costs, summary stats table |
 
-The sidebar has a **Refresh data** button and usage instructions. The signal tab reads `results/latest_prediction.json`; run `python predict.py --shap` to update it.
+The sidebar has a **Refresh data** button. The dashboard auto-loads `results/latest_prediction.json` and `results/latest_summary.json`; run `morning_run.py` to update both before opening.
+
+---
+
+## Current results (walk-forward out-of-sample, 2016–2026)
+
+| Target | Champion | AUC | Sharpe | vs Buy-and-Hold |
+|--------|----------|-----|--------|-----------------|
+| 1-day direction | `xgboost_cal` | 0.566 | 0.82 | +signal above random |
+| 5-day direction | `xgboost_cal` | 0.607 | 1.36 | stronger 5d signal |
+
+**Model ranking (1d AUC):** `xgboost_cal` > `xgboost` > `logistic` > `random_forest` > `lgbm` > `ensemble`
+
+Champion selection: 60% AUC + 40% Sharpe (capped at 3.0), written to `results/champion.json`.
 
 ---
 
@@ -65,7 +101,7 @@ Open **http://localhost:8000/docs** for the interactive Swagger UI.
 |--------|----------|-------------|
 | GET | `/health` | Liveness check |
 | GET | `/signal` | Latest cached market signal |
-| GET | `/summary?live_news=true` | **Operative summary**: prediction narrative + sentiment + media |
+| GET | `/summary?live_news=true` | Operative summary: prediction narrative + sentiment + media |
 | GET | `/indicators` | All technical indicator states |
 | GET | `/latest` | Most recent feature vector |
 | GET | `/history?n=252` | Last N days of OHLCV + log-return |
@@ -81,20 +117,22 @@ Open **http://localhost:8000/docs** for the interactive Swagger UI.
 jupyter lab notebooks/ibex_study.ipynb
 ```
 
-The notebook answers six literature-driven research questions about what drives IBEX35 forecastability:
+The notebook answers eight literature-driven research questions about IBEX35 forecastability:
 
 | # | Question | Key finding |
 |---|----------|-------------|
 | Q1 | Does EURO STOXX 50 add incremental predictive power? | VIX level has the highest IC; STOXX50 lags add small signal |
-| Q2 | Do volatility-regime variables matter more than trend variables? | High-vol regime shows wider distributions; momentum degrades |
+| Q2 | Do volatility-regime variables matter more than trend variables? | High-vol regime shows wider feature distributions; momentum degrades |
 | Q3 | Does constituent correlation structure carry signal? | Average pairwise correlation spikes in crises (2008, 2020) |
-| Q4 | Which feature family drives the model most? | Trend > Lagged Returns > Volatility (XGBoost, 1d direction) |
+| Q4 | Which feature family drives the model most? | Trend > Lagged Returns > Volatility (XGBoost SHAP, 1d direction) |
 | Q5 | Is direction prediction easier than return regression? | Yes — AUC > 0.5 achievable; return R² ≈ 0 |
-| Q6 | Are drivers stable across walk-forward windows? | AUC fluctuates; high-vol regimes are hardest to predict |
+| Q6 | Are drivers stable across walk-forward windows? | AUC fluctuates; high-vol regimes (2020) are hardest to predict |
+| Q7 | Does the rolling training window affect performance? | Rolling 48m outperforms expanding for post-2016 data |
+| Q8 | Does news sentiment add incremental value? | Sentiment features add marginal AUC; strong correlation with momentum |
 
 Saved plots: `results/study_0*.png`
 
-**Literature basis**: Giantsidi & Tarantola (2025) deep-learning review; 2025 indicator study (momentum/trend/volatility/volume families); STOXX white paper (VSTOXX–EURO STOXX correlation); Finance Research Letters 2024 (constituent correlation).
+**Literature basis**: Giantsidi & Tarantola (2025); Tetlock (2007); Loughran & McDonald (2011); Baker & Wurgler (2007); Da, Engelberg & Gao (2011); Garcia (2013).
 
 ---
 
@@ -103,25 +141,33 @@ Saved plots: `results/study_0*.png`
 ```
 IBEX35_Prediction/
 ├── app/
-│   ├── dashboard.py        # Streamlit dashboard (6 tabs)
+│   ├── dashboard.py        # Streamlit dashboard (7 tabs)
+│   ├── summary.py          # Operative summary generator
 │   └── api.py              # FastAPI REST API
 ├── notebooks/
-│   └── ibex_study.ipynb    # Research notebook (6 questions)
+│   └── ibex_study.ipynb    # Research notebook (8 questions)
 ├── src/
 │   ├── data/
-│   │   ├── fetch.py        # Yahoo Finance downloader + parquet cache
-│   │   ├── features.py     # 109 technical features, 5 categories (no lookahead)
-│   │   ├── multiasset.py   # EURO STOXX 50, DAX, S&P500, EUR/USD, VIX, Brent, US10y
-│   │   └── sentiment.py    # RSS-based news sentiment (V2 stub)
+│   │   ├── fetch.py            # Yahoo Finance downloader + parquet cache
+│   │   ├── features.py         # 89 base technical features (no lookahead)
+│   │   ├── multiasset.py       # STOXX50, DAX, S&P500, EUR/USD, VIX, Brent, US10y
+│   │   ├── sentiment_features.py  # Daily sentiment feature block (14 features)
+│   │   ├── news_loader.py      # RSS feed loader
+│   │   ├── news_entities.py    # Article classification (index/constituent/macro)
+│   │   └── sentiment.py        # Sentiment integration shim
 │   ├── models/
-│   │   ├── baseline.py     # XGBoost, LightGBM, LogReg, RF factories
+│   │   ├── baseline.py     # XGBoost (+calibrated), LightGBM, LogReg, RF factories
 │   │   ├── ensemble.py     # Stacking + model save/load with feature_names bundle
 │   │   └── lstm.py         # LSTM scaffold (V3)
 │   ├── evaluation/
-│   │   ├── backtest.py     # Walk-forward (expanding or rolling window) + backtest
+│   │   ├── backtest.py     # Walk-forward (expanding or rolling window) + backtest metrics
 │   │   └── metrics.py      # Classification + economic metrics
-│   └── explainability/
-│       └── shap_analysis.py # SHAP with feature-count alignment fix
+│   ├── explainability/
+│   │   └── shap_analysis.py   # SHAP with CalibratedClassifierCV unwrapping
+│   └── nlp/
+│       ├── sentiment_models.py  # Transformer / keyword scorer
+│       └── sentiment_scoring.py # Article scoring + ScoredArticle dataclass
+├── morning_run.py          # Daily pre-session pipeline (predict + summary)
 ├── train.py                # Walk-forward training pipeline
 ├── predict.py              # Latest-row prediction + SHAP
 └── config.yaml             # All hyperparameters, paths, and walk-forward config
@@ -129,20 +175,22 @@ IBEX35_Prediction/
 
 ---
 
-## Technical indicators — 109 base features
+## Technical indicators — 89 base features
 
 | Category | Indicators |
 |----------|-----------|
-| **Trend** | SMA 5/10/20/50/100/200 distance, EMA 8/21/55 distance, ADX 14/21, DI+/DI−, 3 SMA crossovers, LinReg slope 10/20/50d, 52-week high/low distance |
-| **Momentum** | RSI 7/14/21, Stochastic %K/%D, Williams %R 14, CCI 14/20, ROC 5/10/21d, MACD line/signal/histogram |
-| **Volatility** | Bollinger %B/width/band distances, ATR 7/14/21 (normalised), ATR ratio, Keltner Channel %, HV 5/10/21/63d, HV ratios, Chaikin Volatility |
+| **Trend** | SMA 5/10/20/50/100/200 distance, EMA 8/55 distance, ADX 14/21, DI+/DI−/diff, 3 SMA crossovers, LinReg slope 10/20/50d, 52-week high/low distance |
+| **Momentum** | RSI 7/14, Stochastic %K/%D, CCI 20, MACD line/signal/histogram |
+| **Volatility** | Bollinger %B/width/band distances, ATR 7/14 (normalised), ATR ratio, Keltner Channel %, HV 5/10/21/63d, HV ratios, vol regime (low/normal/high), Chaikin Volatility |
 | **Volume** | OBV slope, CMF 20, MFI 14, ADL slope, PVT slope, volume z-score, volume ratios, signed price×volume |
 | **Pivots** | Rolling resistance/support distances (10/20/50d), classical pivot + R1/S1/R2/S2, round-level distance |
-| **Base** | Lagged returns (1/2/3/5/10/21d), rolling mean/std/skew (5/10/21/63d), HL ratio, calendar features, realized volatility + slope |
+| **Base** | Lagged returns (1/2/3/5/10/21d), rolling mean/std/skew (5/10/21/63d), HL ratio, realized volatility + slope |
+
+**128 total features** with multi-asset + sentiment (Track B, 2016+).
 
 ---
 
-## Multi-asset features (optional)
+## Multi-asset features
 
 | Asset | Ticker | Features |
 |-------|--------|----------|
@@ -151,41 +199,24 @@ IBEX35_Prediction/
 | S&P 500 | ^GSPC | Lag-1/2/5 returns |
 | EUR/USD | EURUSD=X | Lag-1/2/5 returns |
 | VIX | ^VIX | Lag-1/2/5 returns + level + 21d z-score |
-| VSTOXX | ^V2TX | Lag-1/2/5 returns + level + 21d z-score *(unavailable on Yahoo Finance)* |
+| VSTOXX | ^V2TX | *(delisted from Yahoo Finance — skipped gracefully)* |
 | Brent Oil | BZ=F | Lag-1/2/5 returns |
 | US 10y yield | ^TNX | Lag-1/2/5 returns |
-
-Train with multi-asset: remove `--no-multiasset` flag.
 
 ---
 
 ## Walk-forward design
 
-| Parameter | Default | Notes |
-|-----------|---------|-------|
-| Initial train window | 36 months | Expanding from first observation |
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Initial train window | 36 months | ~3 years before first validation fold |
 | Step | 3 months | New validation fold every quarter |
 | Validation window | 3 months | Out-of-sample per fold |
-| Max train months | null (expanding) | Set to e.g. `48` for rolling 4-year window |
+| **Max train months** | **48** | Rolling 4-year window — more regime-adaptive than expanding |
 | Transaction cost | 10 bps | One-way, applied on each position change |
-| Confidence threshold | 55% | P(up) ≥ 55% to go long |
+| Confidence threshold | 55% | P(up) ≥ 55% → long signal |
 
-**On COVID (2020)**: the system includes 2020 data by design. Recent literature (2022–2025) recommends keeping extreme-regime periods in training — they teach the model real tail-risk behavior. A rolling window (`max_train_months: 48`) naturally down-weights pre-crisis data without discarding it.
-
----
-
-## Dependencies
-
-| Package | Notes |
-|---------|-------|
-| `xgboost>=2.1.0,<3.0.0` | **Pinned** — XGBoost 3.x breaks SHAP's TreeExplainer |
-| `shap>=0.45.0` | Required for explainability tabs |
-| `streamlit>=1.35.0` | Dashboard |
-| `fastapi>=0.110.0` + `uvicorn` | REST API |
-
-```bash
-pip install -r requirements.txt
-```
+**Rolling vs expanding**: `max_train_months: 48` (set in `config.yaml`) discounts pre-2016 data in recent folds, which improves post-COVID performance. Literature (Giantsidi & Tarantola 2025) recommends rolling 3–5y windows for non-stationary daily equity data.
 
 ---
 
@@ -205,17 +236,32 @@ Three-layer composite aligned with Tetlock (2007) / Loughran & McDonald (2011):
 - `w_time`: exponential decay with 18h half-life (Da et al. 2011)
 - `w_novelty`: 1/√rank within same topic per day (Chan 2003)
 
+**14 sentiment features**: composite/direct/macro/constituent scores, EMAs (3d/5d), z-score vs 20d, neg-share, dispersion, count, shock-count, abs-mean, change, coverage flag.
+
 **Two-track design** (coverage integrity principle):
 
 | Track | Config | Period | Purpose |
 |-------|--------|--------|---------|
-| A | `include_sentiment: false` | Full history 2007–today | Price/vol/regime baseline |
-| B | `include_sentiment: true` | `sentiment_start_date` onwards | Base vs base+sentiment ablation |
+| A | `include_sentiment: false` | Full history 2007–today | Baseline without sentiment |
+| B | `include_sentiment: true` | `sentiment.start_date` onward (default 2016-01-01) | Ablation: base vs base+sentiment |
 
-Dates before `sentiment.start_date` are `NaN` (archive unavailable), not `0` (no news).
-Only run Track A vs Track B on the **same date range** to measure incremental value.
+Dates before `sentiment.start_date` → `NaN` (archive unavailable), not `0` (no news). Only compare Track A vs B on the **same date range**.
 
-Set `sentiment.start_date` to the earliest date with trustworthy, stable RSS coverage.
+---
+
+## Dependencies
+
+| Package | Notes |
+|---------|-------|
+| `xgboost>=2.1.0,<3.0.0` | Pinned — XGBoost 3.x breaks SHAP's TreeExplainer |
+| `shap>=0.45.0` | Required for Explainability tab and `--shap` flag |
+| `streamlit>=1.44.0` | Dashboard (uses `width='stretch'` API) |
+| `fastapi>=0.110.0` + `uvicorn` | REST API |
+| `lightgbm`, `scikit-learn` | Model dependencies |
+
+```bash
+pip install -r requirements.txt
+```
 
 ---
 
@@ -223,7 +269,7 @@ Set `sentiment.start_date` to the earliest date with trustworthy, stable RSS cov
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| V1 | Done | XGBoost · LightGBM · LogReg · RF · walk-forward · SHAP · dashboard · API |
-| V2 | Done | Three-layer sentiment (keyword fallback + optional transformers) · operative summary |
+| V1 | ✅ Done | XGBoost · LightGBM · LogReg · RF · walk-forward · SHAP · dashboard · API |
+| V2 | ✅ Done | Three-layer sentiment · operative summary · calibrated XGBoost · rolling window · daily morning script |
 | V3 | Scaffold | Probabilistic / quantile forecasting + LSTM |
 | V4 | Planned | Reinforcement learning agent (ABIDES-style) |

@@ -215,18 +215,28 @@ def generate_summary(
     pred: dict = {}
     if pred_path.exists():
         with open(pred_path) as f:
-            pred = json.load(f)
+            raw = json.load(f)
+        # Handle nested format: {"target_dir_1d": {...}, "target_dir_5d": {...}}
+        if "target_dir_1d" in raw:
+            pred = raw["target_dir_1d"]
+        elif "target_dir_5d" in raw:
+            pred = raw["target_dir_5d"]
+        else:
+            pred = raw  # flat format (legacy)
 
-    has_pred = bool(pred)
+    has_pred  = bool(pred) and "signal" in pred
     signal    = pred.get("signal", "UNKNOWN")
-    prob      = pred.get("probability", None)
+    # predict.py uses prob_up; support both key names
+    prob      = pred.get("prob_up", pred.get("probability", None))
     horizon   = pred.get("horizon", "1d")
     model     = pred.get("model", "unknown")
     pred_date = pred.get("date", "—")
-    shap_raw  = pred.get("shap_values", {})
+    # top_drivers list → convert to shap_raw dict for backward compat
+    top_drivers_list = pred.get("top_drivers", [])
+    shap_raw  = {d["feature"]: d["shap_value"] for d in top_drivers_list}
 
     # ── 2. Top SHAP drivers ───────────────────────────────────────────────────
-    feat_vals = pred.get("feature_values", {})
+    feat_vals = {d["feature"]: d.get("feat_value", float("nan")) for d in top_drivers_list}
     shap_sorted = sorted(shap_raw.items(), key=lambda x: abs(x[1]), reverse=True)[:n_shap_features]
     shap_drivers = []
     for name, sv in shap_sorted:
