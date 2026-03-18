@@ -670,43 +670,90 @@ with t_backtest:
                 default=list(r_bt.keys())[:3],
             )
 
-        fig_eq = go.Figure()
-        has_bm = False
+        fig_eq = make_subplots(
+            rows=2, cols=1, shared_xaxes=True,
+            row_heights=[0.65, 0.35], vertical_spacing=0.04,
+            subplot_titles=["Equity curve (walk-forward, after costs)", "Drawdown (%)"],
+        )
+        has_bm    = False
+        bm_index  = None
+        bt_stats  = []
 
         for model_name in selected_models:
             pred_df = load_predictions_df(target_bt, model_name)
             if pred_df is None or "y_prob" not in pred_df.columns:
                 continue
-            ret_series = df_feat["target_ret_1d"].reindex(pred_df.index).fillna(0) \
-                         if "target_ret_1d" in df_feat.columns \
+            ret_col = "target_ret_5d" if "5d" in target_bt and "target_ret_5d" in df_feat.columns \
+                      else "target_ret_1d"
+            ret_series = df_feat[ret_col].reindex(pred_df.index).fillna(0) \
+                         if ret_col in df_feat.columns \
                          else pd.Series(0.0, index=pred_df.index)
 
-            positions = np.where(pred_df["y_prob"] >= min_conf_bt, 1.0, 0.0)
-            trades    = np.abs(np.diff(positions, prepend=0.0))
-            strat_ret = positions * ret_series.values - trades * tc_bps_bt / 10_000
-            equity    = (1 + strat_ret).cumprod()
+            positions  = np.where(pred_df["y_prob"] >= min_conf_bt, 1.0, 0.0)
+            trades     = np.abs(np.diff(positions, prepend=0.0))
+            # Log returns → compound with exp(cumsum); subtract simple transaction costs
+            log_ret    = ret_series.values
+            strat_ret  = positions * log_ret - trades * tc_bps_bt / 10_000
+            equity     = np.exp(np.cumsum(strat_ret))
+            drawdown   = (equity / np.maximum.accumulate(equity) - 1) * 100
+
+            ann_ret   = float(np.exp(strat_ret.mean() * 252) - 1)
+            ann_vol   = float(strat_ret.std() * np.sqrt(252))
+            sharpe    = ann_ret / ann_vol if ann_vol > 0 else 0.0
+            max_dd    = float(drawdown.min())
+            bt_stats.append({"Model": model_name,
+                              "Ann. Return": f"{ann_ret:.1%}",
+                              "Ann. Vol": f"{ann_vol:.1%}",
+                              "Sharpe": f"{sharpe:.2f}",
+                              "Max DD": f"{max_dd:.1f}%"})
 
             fig_eq.add_trace(go.Scatter(
-                x=pred_df.index, y=equity,
-                name=model_name, mode="lines",
-            ))
+                x=pred_df.index, y=equity, name=model_name, mode="lines",
+            ), row=1, col=1)
+            fig_eq.add_trace(go.Scatter(
+                x=pred_df.index, y=drawdown, name=model_name,
+                mode="lines", showlegend=False,
+            ), row=2, col=1)
 
             if not has_bm:
-                bm_equity = (1 + ret_series).cumprod()
+                bm_log = ret_series.values
+                bm_equity  = np.exp(np.cumsum(bm_log))
+                bm_drawdown = (bm_equity / np.maximum.accumulate(bm_equity) - 1) * 100
+                bm_ann_ret  = float(np.exp(bm_log.mean() * 252) - 1)
+                bm_ann_vol  = float(bm_log.std() * np.sqrt(252))
+                bm_sharpe   = bm_ann_ret / bm_ann_vol if bm_ann_vol > 0 else 0.0
+                bm_maxdd    = float(bm_drawdown.min())
+                bt_stats.append({"Model": "Buy & Hold",
+                                  "Ann. Return": f"{bm_ann_ret:.1%}",
+                                  "Ann. Vol": f"{bm_ann_vol:.1%}",
+                                  "Sharpe": f"{bm_sharpe:.2f}",
+                                  "Max DD": f"{bm_maxdd:.1f}%"})
                 fig_eq.add_trace(go.Scatter(
-                    x=pred_df.index, y=bm_equity,
-                    name="Buy & Hold", mode="lines",
+                    x=pred_df.index, y=bm_equity, name="Buy & Hold", mode="lines",
                     line=dict(color="gray", dash="dot"),
-                ))
-                has_bm = True
+                ), row=1, col=1)
+                fig_eq.add_trace(go.Scatter(
+                    x=pred_df.index, y=bm_drawdown, name="Buy & Hold",
+                    mode="lines", showlegend=False,
+                    line=dict(color="gray", dash="dot"),
+                ), row=2, col=1)
+                has_bm   = True
+                bm_index = pred_df.index
 
         if fig_eq.data:
             fig_eq.update_layout(
-                height=440, yaxis_title="Portfolio value (base=1)",
-                margin=dict(t=10, b=0, l=0, r=0),
-                legend=dict(orientation="h"),
-                title="Out-of-sample equity curve (walk-forward, after costs)",
+                height=520, margin=dict(t=30, b=0, l=0, r=0),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
             )
+            fig_eq.update_yaxes(title_text="Portfolio value (base=1)", row=1, col=1)
+            fig_eq.update_yaxes(title_text="Drawdown (%)", row=2, col=1)
+            fig_eq.add_hline(y=0, line_dash="dot", line_color="red",
+                             line_width=1, row=2, col=1)
             st.plotly_chart(fig_eq, width="stretch", key="bt_equity_curve")
+
+            if bt_stats:
+                st.markdown("**Summary statistics (out-of-sample)**")
+                st.dataframe(pd.DataFrame(bt_stats).set_index("Model"),
+                             use_container_width=True)
         else:
             st.info("Run `python train.py` to generate predictions.")
